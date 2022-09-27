@@ -41,9 +41,10 @@ type Cluster struct {
 	clock      clock.Clock
 
 	// Node Status & Pod -> Node Binding
-	mu       sync.RWMutex
-	nodes    map[string]*Node                // node name -> node
-	bindings map[types.NamespacedName]string // pod namespaced named -> node name
+	mu          sync.RWMutex
+	nodes       map[string]*Node                // node name -> node
+	bindings    map[types.NamespacedName]string // pod namespaced named -> node name
+	unboundPods map[types.NamespacedName]*v1.Pod
 
 	updateObservers []observerFunc
 
@@ -56,10 +57,11 @@ type Cluster struct {
 
 func NewCluster(clk clock.Clock, client client.Client) *Cluster {
 	c := &Cluster{
-		clock:      clk,
-		kubeClient: client,
-		nodes:      map[string]*Node{},
-		bindings:   map[types.NamespacedName]string{},
+		clock:       clk,
+		kubeClient:  client,
+		nodes:       map[string]*Node{},
+		bindings:    map[types.NamespacedName]string{},
+		unboundPods: map[types.NamespacedName]*v1.Pod{},
 	}
 	return c
 }
@@ -114,6 +116,29 @@ func (c *Cluster) ForEachNode(f func(n *Node) bool) {
 
 	for _, node := range nodes {
 		if !f(node) {
+			return
+		}
+	}
+}
+
+func (c *Cluster) ForEachUnboundPod(f func(*v1.Pod) bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var pods []*v1.Pod
+	for _, pod := range c.unboundPods {
+		pods = append(pods, pod)
+	}
+	// sort nodes by creation time so we provide a consistent ordering
+	sort.Slice(pods, func(a, b int) bool {
+		if pods[a].CreationTimestamp != pods[b].CreationTimestamp {
+			return pods[a].CreationTimestamp.Time.Before(pods[b].CreationTimestamp.Time)
+		}
+		// sometimes we get nodes created in the same second, so sort again by node UID to provide a consistent ordering
+		return pods[a].UID < pods[b].UID
+	})
+
+	for _, pod := range pods {
+		if !f(pod) {
 			return
 		}
 	}
@@ -286,15 +311,17 @@ func (c *Cluster) updatePod(ctx context.Context, pod *v1.Pod) error {
 // updateNodeUsageFromPod is called every time a reconcile event occurs for the pod. If the pods binding has changed
 // (unbound to bound), we need to update the resource requests on the node.
 func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error {
-	// nothing to do if the pod isn't bound, checking early allows avoiding unnecessary locking
-	if pod.Spec.NodeName == "" {
-		return nil
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	podKey := client.ObjectKeyFromObject(pod)
+	// nothing to do if the pod isn't bound, checking early allows avoiding unnecessary locking
+	if pod.Spec.NodeName == "" {
+		c.unboundPods[podKey] = pod
+		return nil
+	}
+	delete(c.unboundPods, podKey)
+
 	oldNodeName, bindingKnown := c.bindings[podKey]
 	if bindingKnown {
 		if oldNodeName == pod.Spec.NodeName {
@@ -347,7 +374,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 
 func (c *Cluster) ensureNodeCreated(ctx context.Context, nodeName string) error {
 	// did we notice that the pod is bound to a node and didn't know about the node before?
-	n, ok := c.nodes[nodeName]
+	_, ok := c.nodes[nodeName]
 	if !ok {
 		var node v1.Node
 		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodeName}, &node); err != nil && !errors.IsNotFound(err) {
@@ -356,7 +383,7 @@ func (c *Cluster) ensureNodeCreated(ctx context.Context, nodeName string) error 
 
 		var err error
 		// node didn't exist, but creating it will pick up this newly bound pod as well
-		n, err = c.newNode(ctx, &node)
+		n, err := c.newNode(ctx, &node)
 		if err != nil {
 			// no need to delete c.nodes[node.Name] as it wasn't stored previously
 			return err

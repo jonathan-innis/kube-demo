@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+	v1 "k8s.io/api/core/v1"
 
 	"github.com/bwagner5/kube-demo/pkg/model/style"
 	"github.com/bwagner5/kube-demo/pkg/model/views"
@@ -21,6 +22,7 @@ type k8sStateChange struct{}
 type Model struct {
 	cluster        *state.Cluster
 	storedNodes    []*state.Node
+	unboundPods    []*v1.Pod
 	selectedNode   int
 	selectedPod    int
 	podSelection   bool
@@ -72,8 +74,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			select {
 			case <-m.events:
 				m.storedNodes = []*state.Node{}
+				m.unboundPods = []*v1.Pod{}
 				m.cluster.ForEachNode(func(n *state.Node) bool {
 					m.storedNodes = append(m.storedNodes, n)
+					return true
+				})
+				m.cluster.ForEachUnboundPod(func(p *v1.Pod) bool {
+					m.unboundPods = append(m.unboundPods, p)
 					return true
 				})
 				return k8sStateChange{}
@@ -152,7 +159,7 @@ func (m *Model) View() string {
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			views.Nodes(m.selectedNode, m.storedNodes),
-			views.Cluster(m.storedNodes),
+			views.Cluster(m.storedNodes, m.unboundPods),
 		),
 	)
 	_ = physicalHeight - strings.Count(canvas.String(), "\n")

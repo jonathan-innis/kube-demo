@@ -38,7 +38,7 @@ func Nodes(selectedNode int, nodes []*state.Node) string {
 			lipgloss.JoinVertical(lipgloss.Left,
 				node.Node.Name,
 				Pods(node),
-				"---------",
+				style.Separator,
 				DaemonSetPods(node),
 				"\n",
 				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).

@@ -1,19 +1,24 @@
 package views
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
 	v1 "k8s.io/api/core/v1"
 
+	"github.com/bwagner5/kube-demo/pkg/model/components"
 	"github.com/bwagner5/kube-demo/pkg/model/style"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/utils/resources"
 )
 
-func Cluster(nodes []*state.Node) string {
+func Cluster(nodes []*state.Node, unboundPods []*v1.Pod) string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		"Cluster Utilization\n",
+		"Cluster",
+		style.Separator,
+		fmt.Sprintf("Unbound Pods Count: %d\n", len(unboundPods)),
 		clusterUtilization(nodes),
 	)
 }
@@ -26,10 +31,9 @@ func clusterUtilization(nodes []*state.Node) string {
 		used = resources.Merge(used, node.PodTotalRequests)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Left,
-		progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
-			ViewAs(float64(used.Cpu().Value())/float64(allocatable.Cpu().Value())),
-		"   ",
-		progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
-			ViewAs(float64(used.Memory().Value())/float64(allocatable.Memory().Value())),
+		"Utilization\t--\t",
+		components.UtilizationBar("CPU", used.Cpu().Value(), allocatable.Cpu().Value(), progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding())),
+		"\t",
+		components.UtilizationBar("Memory", used.Memory().Value(), allocatable.Memory().Value(), progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding())),
 	)
 }
