@@ -1,15 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,19 +18,28 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/clock"
+	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	nodeutils "github.com/bwagner5/kube-demo/pkg/node"
+	"github.com/bwagner5/kube-demo/pkg/state"
 )
 
 var canvasStyle = lipgloss.NewStyle().Padding(1, 2, 1, 2)
 
-var white = lipgloss.Color("#FFFFFF")
-var black = lipgloss.Color("#000000")
-var pink = lipgloss.Color("#F87575")
-var teal = lipgloss.Color("#27CEBD")
-var grey = lipgloss.Color("#6C7D89")
+const (
+	white  = lipgloss.Color("#FFFFFF")
+	black  = lipgloss.Color("#000000")
+	pink   = lipgloss.Color("#F87575")
+	teal   = lipgloss.Color("#27CEBD")
+	grey   = lipgloss.Color("#6C7D89")
+	yellow = lipgloss.Color("#FFFF00")
+	red    = lipgloss.Color("#FF0000")
+)
 
 var nodeBorder = grey
 var selectedNodeBorder = pink
@@ -38,19 +48,17 @@ var defaultPodBorder = teal
 var nodeStyle = lipgloss.NewStyle().
 	Align(lipgloss.Left).
 	Foreground(white).
-	Background(black).
 	Border(lipgloss.HiddenBorder(), true).
 	BorderBackground(nodeBorder).
 	Margin(1).
-	Padding(1).
+	Padding(0, 1, 0, 1).
 	Height(10).
 	Width(30)
 
 var podStyle = lipgloss.NewStyle().
 	Align(lipgloss.Bottom).
 	Foreground(white).
-	Background(black).
-	Border(lipgloss.RoundedBorder(), true).
+	Border(lipgloss.NormalBorder(), true).
 	BorderForeground(defaultPodBorder).
 	Margin(0).
 	Padding(0).
@@ -91,60 +99,36 @@ func (k keyMap) FullHelp() [][]key.Binding {
 type k8sStateChange struct{}
 
 type Model struct {
-	Nodes           []*corev1.Node
-	selectedNode    int
-	selectedPod     int
-	podSelection    bool
-	details         bool
-	informerFactory informers.SharedInformerFactory
-	nodeInformer    cache.SharedIndexInformer
-	podInformer     cache.SharedIndexInformer
-	stopCh          chan struct{}
-	k8sStateUpdate  chan struct{}
-	help            help.Model
-	viewport        viewport.Model
+	cluster        *state.Cluster
+	storedNodes    []*state.Node
+	selectedNode   int
+	selectedPod    int
+	podSelection   bool
+	details        bool
+	stop           chan struct{}
+	k8sStateUpdate chan struct{}
+	help           help.Model
+	events         <-chan struct{}
+	viewport       viewport.Model
 }
 
-func New() *Model {
-	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
-	if err != nil {
-		log.Fatalf("could not initialize kubeconfig: %v", err)
-	}
-	kubeclient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Fatalf("could not initialize kube-client: %v", err)
-	}
-	informerFactory := informers.NewSharedInformerFactory(kubeclient, time.Minute*10)
-	stopCh := make(chan struct{})
-	k8sStateUpdate := make(chan struct{})
-	nodeInformer := informerFactory.Core().V1().Nodes().Informer()
-	podInformer := informerFactory.Core().V1().Pods().Informer()
+func New(config *rest.Config, cluster *state.Cluster) *Model {
+	stop := make(chan struct{})
+	events := make(chan struct{}, 100)
 	model := &Model{
-		informerFactory: informerFactory,
-		nodeInformer:    nodeInformer,
-		podInformer:     podInformer,
-		stopCh:          stopCh,
-		k8sStateUpdate:  k8sStateUpdate,
-		help:            help.New(),
-		viewport:        viewport.New(0, 0),
+		cluster:  cluster,
+		stop:     stop,
+		events:   events,
+		help:     help.New(),
+		viewport: viewport.New(0, 0),
 	}
-	model.nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ interface{}) { model.k8sStateUpdate <- struct{}{} },
-		UpdateFunc: func(_, _ interface{}) { model.k8sStateUpdate <- struct{}{} },
-		DeleteFunc: func(_ interface{}) { model.k8sStateUpdate <- struct{}{} },
-	})
-	model.podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ interface{}) { model.k8sStateUpdate <- struct{}{} },
-		UpdateFunc: func(_, _ interface{}) { model.k8sStateUpdate <- struct{}{} },
-		DeleteFunc: func(_ interface{}) { model.k8sStateUpdate <- struct{}{} },
-	})
-	informerFactory.Start(stopCh) // runs in backgrounds
+	cluster.AddOnChangeObserver(func() { events <- struct{}{} })
 	return model
 }
 
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(func() tea.Msg {
-		m.informerFactory.WaitForCacheSync(m.stopCh)
+		//m.informerFactory.WaitForCacheSync(m.stopCh)
 		return k8sStateChange{}
 	}, tea.EnterAltScreen)
 }
@@ -154,7 +138,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			close(m.stopCh)
+			close(m.stop)
 			return m, tea.Quit
 		case "left", "right", "up", "down":
 			m.selectedNode = m.moveCursor(msg)
@@ -166,9 +150,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case k8sStateChange:
 		return m, func() tea.Msg {
 			select {
-			case <-m.k8sStateUpdate:
+			case <-m.events:
+				m.storedNodes = []*state.Node{}
+				m.cluster.ForEachNode(func(n *state.Node) bool {
+					m.storedNodes = append(m.storedNodes, n)
+					return true
+				})
 				return k8sStateChange{}
-			case <-m.stopCh:
+			case <-m.stop:
 				return nil
 			}
 		}
@@ -177,7 +166,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) moveCursor(key tea.KeyMsg) int {
-	totalObjects := len(m.nodeInformer.GetStore().ListKeys())
+	totalObjects := len(m.storedNodes)
 	perRow := m.GetBoxesPerRow(canvasStyle, nodeStyle)
 	switch key.String() {
 	case "right":
@@ -189,7 +178,7 @@ func (m *Model) moveCursor(key tea.KeyMsg) int {
 		return rowNum*perRow + index%perRow
 	case "left":
 		rowNum := m.selectedNode / perRow
-		index := rowNum*perRow + mod((m.selectedNode-1), perRow)
+		index := rowNum*perRow + mod(m.selectedNode-1, perRow)
 		if index >= totalObjects {
 			return totalObjects - 1
 		}
@@ -228,7 +217,7 @@ func (m *Model) View() string {
 		m.viewport.Height = physicalHeight
 		m.viewport.Width = physicalWidth
 
-		out, err := yaml.Marshal(m.getNodes()[m.selectedNode].Spec)
+		out, err := yaml.Marshal(m.storedNodes[m.selectedNode].Node.Spec)
 		if err == nil {
 			m.viewport.SetContent(string(out))
 		}
@@ -240,8 +229,8 @@ func (m *Model) View() string {
 	canvasStyle = canvasStyle.MaxWidth(physicalWidth).Width(physicalWidth)
 	var canvas strings.Builder
 	canvas.WriteString(m.nodes())
-	spaceToBottom := physicalHeight - strings.Count(canvas.String(), "\n")
-	return canvasStyle.Render(canvas.String()+strings.Repeat("\n", spaceToBottom)) + "\n" + m.help.View(keyMappings)
+	_ = physicalHeight - strings.Count(canvas.String(), "\n")
+	return canvasStyle.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)
 }
 
 func (m *Model) GetBoxesPerRow(container lipgloss.Style, subContainer lipgloss.Style) int {
@@ -253,18 +242,35 @@ func (m *Model) nodes() string {
 	var boxRows [][]string
 	row := -1
 	perRow := m.GetBoxesPerRow(canvasStyle, nodeStyle)
-	for i, node := range m.getNodes() {
+	for i, node := range m.storedNodes {
 		color := nodeStyle.GetBorderBottomBackground()
+		if node.Node.Spec.Unschedulable {
+			color = yellow
+		}
+		readyConditionStatus := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status
+		switch readyConditionStatus {
+		case "False":
+			color = red
+		case "True":
+			color = grey
+		default:
+			color = yellow
+		}
 		if i == m.selectedNode {
 			color = selectedNodeBorder
 		}
 		box := nodeStyle.Copy().BorderBackground(color).Render(
 			lipgloss.JoinVertical(lipgloss.Left,
-				node.Name,
+				node.Node.Name,
 				m.pods(node, nodeStyle),
+				progress.New(progress.WithWidth(nodeStyle.GetWidth()-nodeStyle.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+					ViewAs(float64(node.PodTotalRequests.Cpu().Value())/float64(node.Allocatable.Cpu().Value())),
+				progress.New(progress.WithWidth(nodeStyle.GetWidth()-nodeStyle.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+					ViewAs(float64(node.PodTotalRequests.Memory().Value())/float64(node.Allocatable.Memory().Value())),
+				fmt.Sprintf("Ready: %s", nodeutils.GetCondition(node.Node, corev1.NodeReady).Status),
 			),
 		)
-		if i%int(perRow) == 0 {
+		if i%perRow == 0 {
 			row++
 			boxRows = append(boxRows, []string{})
 		}
@@ -276,50 +282,32 @@ func (m *Model) nodes() string {
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-func (m *Model) getNodes() []*corev1.Node {
-	nodes := m.nodeInformer.GetStore().List()
-	sort.SliceStable(nodes, func(i, j int) bool {
-		iCreated := nodes[i].(*corev1.Node).CreationTimestamp.Unix()
-		jCreated := nodes[j].(*corev1.Node).CreationTimestamp.Unix()
-		if iCreated == jCreated {
-			return string(nodes[i].(*corev1.Node).UID) < string(nodes[j].(*corev1.Node).UID)
-		}
-		return iCreated < jCreated
-	})
-	var typedNodes []*corev1.Node
-	for _, n := range nodes {
-		typedNodes = append(typedNodes, n.(*corev1.Node))
-	}
-	return typedNodes
-}
-
-func (m *Model) pods(node *corev1.Node, nodeStyle lipgloss.Style) string {
+func (m *Model) pods(node *state.Node, nodeStyle lipgloss.Style) string {
 	var boxRows [][]string
-	pods := lo.Filter(m.podInformer.GetStore().List(), func(obj interface{}, _ int) bool {
-		pod := obj.(*corev1.Pod)
-		return pod.Spec.NodeName == node.Name
-	})
 	perRow := m.GetBoxesPerRow(nodeStyle, podStyle)
+	pods := lo.MapToSlice(node.Pods, func(_ types.NamespacedName, v *corev1.Pod) *corev1.Pod { return v })
 	sort.SliceStable(pods, func(i, j int) bool {
-		iCreated := pods[i].(*corev1.Pod).CreationTimestamp.Unix()
-		jCreated := pods[j].(*corev1.Pod).CreationTimestamp.Unix()
+		iCreated := pods[i].CreationTimestamp.Unix()
+		jCreated := pods[j].CreationTimestamp.Unix()
 		if iCreated == jCreated {
-			return string(pods[i].(*corev1.Pod).UID) < string(pods[j].(*corev1.Pod).UID)
+			return string(pods[i].UID) < string(pods[j].UID)
 		}
 		return iCreated < jCreated
 	})
 	row := -1
-	for i, obj := range pods {
+	for i, pod := range pods {
 		color := podStyle.GetBorderBottomForeground()
 		if i%perRow == 0 {
 			boxRows = append(boxRows, []string{})
 			row++
 		}
-		pod := obj.(*corev1.Pod)
 		for _, o := range pod.OwnerReferences {
 			if o.Kind == "DaemonSet" {
-				// color = yellow
+				//color = yellow
 			}
+		}
+		if pod.Status.Phase == corev1.PodPending {
+			color = red
 		}
 		boxRows[row] = append(boxRows[row], podStyle.Copy().BorderForeground(color).Render(""))
 	}
@@ -330,9 +318,35 @@ func (m *Model) pods(node *corev1.Node, nodeStyle lipgloss.Style) string {
 }
 
 func main() {
-	p := tea.NewProgram(New())
+	ctx, _ := context.WithCancel(context.Background())
+	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+	if err != nil {
+		log.Fatalf("could not initialize kubeconfig: %v", err)
+	}
+
+	cluster := StartControllers(ctx, config)
+	p := tea.NewProgram(New(config, cluster))
 	if err := p.Start(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
 	}
+}
+
+func StartControllers(ctx context.Context, config *rest.Config) *state.Cluster {
+	kubeClient, err := client.New(config, client.Options{})
+	if err != nil {
+		log.Fatalf("could not initialize kube-client: %v", err)
+	}
+
+	cluster := state.NewCluster(&clock.RealClock{}, kubeClient)
+	manager := state.NewManagerOrDie(ctx, config, controllerruntime.Options{})
+	if err := state.Register(ctx, manager, cluster); err != nil {
+		log.Fatalf("%v", err)
+	}
+	go func() {
+		if err := manager.Start(ctx); err != nil {
+			log.Fatalf("%v", err)
+		}
+	}()
+	return cluster
 }
