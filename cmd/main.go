@@ -12,19 +12,19 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/bwagner5/kube-demo/pkg/model"
 	"github.com/bwagner5/kube-demo/pkg/state"
-	"github.com/bwagner5/kube-demo/pkg/views"
 )
 
 func main() {
-	ctx, _ := context.WithCancel(context.Background())
 	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
 	if err != nil {
 		log.Fatalf("could not initialize kubeconfig: %v", err)
 	}
 
+	ctx := context.Background()
 	cluster := startControllers(ctx, config)
-	p := tea.NewProgram(views.NewModel(cluster))
+	p := tea.NewProgram(model.NewModel(cluster))
 	if err := p.Start(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)

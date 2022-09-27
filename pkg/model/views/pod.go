@@ -7,11 +7,12 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/bwagner5/kube-demo/pkg/model/style"
 	"github.com/bwagner5/kube-demo/pkg/state"
-	podutils "github.com/bwagner5/kube-demo/pkg/utils"
+	podutils "github.com/bwagner5/kube-demo/pkg/utils/pod"
 )
 
-func (m *Model) daemonsetPods(node *state.Node) string {
+func DaemonSetPods(node *state.Node) string {
 	pods := lo.Filter(lo.Values(node.Pods), func(p *corev1.Pod, _ int) bool { return podutils.IsOwnedByDaemonSet(p) })
 	sort.SliceStable(pods, func(i, j int) bool {
 		iCreated := pods[i].CreationTimestamp.Unix()
@@ -21,10 +22,10 @@ func (m *Model) daemonsetPods(node *state.Node) string {
 		}
 		return iCreated < jCreated
 	})
-	return m.getPodsView(pods)
+	return getPodsView(pods)
 }
 
-func (m *Model) pods(node *state.Node) string {
+func Pods(node *state.Node) string {
 	pods := lo.Filter(lo.Values(node.Pods), func(p *corev1.Pod, _ int) bool { return !podutils.IsOwnedByDaemonSet(p) })
 	sort.SliceStable(pods, func(i, j int) bool {
 		iCreated := pods[i].CreationTimestamp.Unix()
@@ -34,23 +35,28 @@ func (m *Model) pods(node *state.Node) string {
 		}
 		return iCreated < jCreated
 	})
-	return m.getPodsView(pods)
+	return getPodsView(pods)
 }
 
-func (m *Model) getPodsView(pods []*corev1.Pod) string {
+func getPodsView(pods []*corev1.Pod) string {
 	var boxRows [][]string
-	perRow := m.GetBoxesPerRow(nodeStyle, podStyle)
+	perRow := GetBoxesPerRow(style.Node, style.Pod)
 	row := -1
 	for i, pod := range pods {
-		color := podStyle.GetBorderBottomForeground()
 		if i%perRow == 0 {
 			boxRows = append(boxRows, []string{})
 			row++
 		}
-		if pod.Status.Phase == corev1.PodPending {
-			color = red
+		var color lipgloss.Color
+		switch pod.Status.Phase {
+		case corev1.PodFailed:
+			color = style.Red
+		case corev1.PodPending:
+			color = style.Yellow
+		default:
+			color = style.Teal
 		}
-		boxRows[row] = append(boxRows[row], podStyle.Copy().BorderForeground(color).Render(""))
+		boxRows[row] = append(boxRows[row], style.Pod.Copy().BorderForeground(color).Render(""))
 	}
 	rows := lo.Map(boxRows, func(row []string, _ int) string {
 		return lipgloss.JoinHorizontal(lipgloss.Bottom, row...)

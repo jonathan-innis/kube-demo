@@ -1,4 +1,4 @@
-package views
+package model
 
 import (
 	"os"
@@ -11,6 +11,8 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
+	"github.com/bwagner5/kube-demo/pkg/model/style"
+	"github.com/bwagner5/kube-demo/pkg/model/views"
 	"github.com/bwagner5/kube-demo/pkg/state"
 )
 
@@ -85,7 +87,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) moveCursor(key tea.KeyMsg) int {
 	totalObjects := len(m.storedNodes)
-	perRow := m.GetBoxesPerRow(canvasStyle, nodeStyle)
+	perRow := views.GetBoxesPerRow(style.Canvas, style.Node)
 	switch key.String() {
 	case "right":
 		rowNum := m.selectedNode / perRow
@@ -144,14 +146,15 @@ func (m *Model) View() string {
 		}
 		return m.viewport.View()
 	}
-	canvasStyle = canvasStyle.MaxWidth(physicalWidth).Width(physicalWidth)
+	style.Canvas = style.Canvas.MaxWidth(physicalWidth).Width(physicalWidth)
 	var canvas strings.Builder
-	canvas.WriteString(m.nodes())
+	canvas.WriteString(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			views.Nodes(m.selectedNode, m.storedNodes),
+			views.Cluster(m.storedNodes),
+		),
+	)
 	_ = physicalHeight - strings.Count(canvas.String(), "\n")
-	return canvasStyle.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)
-}
-
-func (m *Model) GetBoxesPerRow(container lipgloss.Style, subContainer lipgloss.Style) int {
-	boxSize := subContainer.GetWidth() + subContainer.GetHorizontalMargins() + subContainer.GetHorizontalBorderSize()
-	return int(float64(container.GetWidth()-container.GetHorizontalPadding()) / float64(boxSize))
+	return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)
 }

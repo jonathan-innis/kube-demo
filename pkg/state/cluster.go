@@ -29,7 +29,8 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	podutils "github.com/bwagner5/kube-demo/pkg/utils"
+	pod2 "github.com/bwagner5/kube-demo/pkg/utils/pod"
+	podutils "github.com/bwagner5/kube-demo/pkg/utils/resources"
 )
 
 type observerFunc func()
@@ -167,7 +168,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 	var daemonsetLimits []v1.ResourceList
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		if podutils.IsTerminal(pod) {
+		if pod2.IsTerminal(pod) {
 			continue
 		}
 		requests := podutils.RequestsForPods(pod)
@@ -177,7 +178,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 		n.podLimits[podKey] = podLimits
 		n.Pods[podKey] = pod
 		c.bindings[podKey] = n.Node.Name
-		if podutils.IsOwnedByDaemonSet(pod) {
+		if pod2.IsOwnedByDaemonSet(pod) {
 			daemonsetRequested = append(daemonsetRequested, requests)
 			daemonsetLimits = append(daemonsetLimits, podLimits)
 		}
@@ -273,7 +274,7 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 // updatePod is called every time the pod is reconciled
 func (c *Cluster) updatePod(ctx context.Context, pod *v1.Pod) error {
 	var err error
-	if podutils.IsTerminal(pod) {
+	if pod2.IsTerminal(pod) {
 		c.updateNodeUsageFromPodCompletion(client.ObjectKeyFromObject(pod))
 	} else {
 		err = c.updateNodeUsageFromPod(ctx, pod)
@@ -333,7 +334,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n.PodTotalRequests = podutils.Merge(n.PodTotalRequests, podRequests)
 	n.PodTotalLimits = podutils.Merge(n.PodTotalLimits, podLimits)
 	// if it's a daemonset, we track what it has requested separately
-	if podutils.IsOwnedByDaemonSet(pod) {
+	if pod2.IsOwnedByDaemonSet(pod) {
 		n.DaemonSetRequested = podutils.Merge(n.DaemonSetRequested, podRequests)
 		n.DaemonSetLimits = podutils.Merge(n.DaemonSetRequested, podLimits)
 	}

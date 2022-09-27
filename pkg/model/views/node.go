@@ -9,40 +9,41 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/bwagner5/kube-demo/pkg/model/style"
 	"github.com/bwagner5/kube-demo/pkg/state"
-	nodeutils "github.com/bwagner5/kube-demo/pkg/utils"
+	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
 )
 
-func (m *Model) nodes() string {
+func Nodes(selectedNode int, nodes []*state.Node) string {
 	var boxRows [][]string
 	row := -1
-	perRow := m.GetBoxesPerRow(canvasStyle, nodeStyle)
-	for i, node := range m.storedNodes {
+	perRow := GetBoxesPerRow(style.Canvas, style.Node)
+	for i, node := range nodes {
 		var color lipgloss.Color
 		readyConditionStatus := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status
 		switch {
 		case node.Node.Spec.Unschedulable:
-			color = orange
+			color = style.Orange
 		case readyConditionStatus == "False":
-			color = red
+			color = style.Red
 		case readyConditionStatus == "True":
-			color = grey
+			color = style.Grey
 		default:
-			color = yellow
+			color = style.Yellow
 		}
-		if i == m.selectedNode {
-			color = selectedNodeBorder
+		if i == selectedNode {
+			color = style.SelectedNodeBorder
 		}
-		box := nodeStyle.Copy().BorderBackground(color).Render(
+		box := style.Node.Copy().BorderBackground(color).Render(
 			lipgloss.JoinVertical(lipgloss.Left,
 				node.Node.Name,
-				m.pods(node),
+				Pods(node),
 				"---------",
-				m.daemonsetPods(node),
+				DaemonSetPods(node),
 				"\n",
-				progress.New(progress.WithWidth(nodeStyle.GetWidth()-nodeStyle.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 					ViewAs(float64(node.PodTotalRequests.Cpu().Value())/float64(node.Allocatable.Cpu().Value())),
-				progress.New(progress.WithWidth(nodeStyle.GetWidth()-nodeStyle.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 					ViewAs(float64(node.PodTotalRequests.Memory().Value())/float64(node.Allocatable.Memory().Value())),
 				fmt.Sprintf("\nReady: %s", nodeutils.GetCondition(node.Node, corev1.NodeReady).Status),
 				getMetadata(node),
