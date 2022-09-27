@@ -16,7 +16,6 @@ package state
 
 import (
 	"context"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -27,8 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
-
-var stateRetryPeriod = 1 * time.Minute
 
 const podControllerName = "pod-state"
 
@@ -55,15 +52,14 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 		}
 		return reconcile.Result{}, err
 	}
-
 	if err := c.cluster.updatePod(ctx, stored); err != nil {
 		return reconcile.Result{}, err
 	}
 
-	return reconcile.Result{Requeue: true, RequeueAfter: stateRetryPeriod}, nil
+	return reconcile.Result{}, nil
 }
 
-func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
+func (c *PodController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.
 		NewControllerManagedBy(m).
 		Named(podControllerName).

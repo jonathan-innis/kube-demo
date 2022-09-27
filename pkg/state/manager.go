@@ -3,14 +3,29 @@ package state
 import (
 	"context"
 	"fmt"
+	"io"
 
+	"github.com/go-logr/logr"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
+
+var (
+	scheme = runtime.NewScheme()
+)
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	klog.SetOutput(io.Discard)
+}
 
 func Register(ctx context.Context, manager manager.Manager, cluster *Cluster) error {
 	return multierr.Combine(
@@ -20,8 +35,11 @@ func Register(ctx context.Context, manager manager.Manager, cluster *Cluster) er
 }
 
 // NewManagerOrDie instantiates a controller manager or panics
-func NewManagerOrDie(ctx context.Context, config *rest.Config, options controllerruntime.Options) manager.Manager {
-	newManager, err := controllerruntime.NewManager(config, options)
+func NewManagerOrDie(ctx context.Context, config *rest.Config) manager.Manager {
+	newManager, err := controllerruntime.NewManager(config, controllerruntime.Options{
+		Logger: logr.Discard(),
+		Scheme: scheme,
+	})
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create controller newManager, %s", err))
 	}

@@ -22,7 +22,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/clock"
-	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nodeutils "github.com/bwagner5/kube-demo/pkg/node"
@@ -34,6 +33,7 @@ var canvasStyle = lipgloss.NewStyle().Padding(1, 2, 1, 2)
 const (
 	white  = lipgloss.Color("#FFFFFF")
 	black  = lipgloss.Color("#000000")
+	orange = lipgloss.Color("#FFA500")
 	pink   = lipgloss.Color("#F87575")
 	teal   = lipgloss.Color("#27CEBD")
 	grey   = lipgloss.Color("#6C7D89")
@@ -100,7 +100,7 @@ type k8sStateChange struct{}
 
 type Model struct {
 	cluster        *state.Cluster
-	storedNodes    []*state.Node
+	storedNodes    []state.Node
 	selectedNode   int
 	selectedPod    int
 	podSelection   bool
@@ -151,9 +151,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			select {
 			case <-m.events:
-				m.storedNodes = []*state.Node{}
+				m.storedNodes = []state.Node{}
 				m.cluster.ForEachNode(func(n *state.Node) bool {
-					m.storedNodes = append(m.storedNodes, n)
+					m.storedNodes = append(m.storedNodes, *n)
 					return true
 				})
 				return k8sStateChange{}
@@ -244,14 +244,13 @@ func (m *Model) nodes() string {
 	perRow := m.GetBoxesPerRow(canvasStyle, nodeStyle)
 	for i, node := range m.storedNodes {
 		color := nodeStyle.GetBorderBottomBackground()
-		if node.Node.Spec.Unschedulable {
-			color = yellow
-		}
 		readyConditionStatus := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status
-		switch readyConditionStatus {
-		case "False":
+		switch {
+		case node.Node.Spec.Unschedulable:
+			color = orange
+		case readyConditionStatus == "False":
 			color = red
-		case "True":
+		case readyConditionStatus == "True":
 			color = grey
 		default:
 			color = yellow
@@ -267,7 +266,10 @@ func (m *Model) nodes() string {
 					ViewAs(float64(node.PodTotalRequests.Cpu().Value())/float64(node.Allocatable.Cpu().Value())),
 				progress.New(progress.WithWidth(nodeStyle.GetWidth()-nodeStyle.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 					ViewAs(float64(node.PodTotalRequests.Memory().Value())/float64(node.Allocatable.Memory().Value())),
-				fmt.Sprintf("Ready: %s", nodeutils.GetCondition(node.Node, corev1.NodeReady).Status),
+				fmt.Sprintf("\nReady: %s", nodeutils.GetCondition(node.Node, corev1.NodeReady).Status),
+				fmt.Sprintf("Pods: %d", len(node.Pods)),
+				fmt.Sprintf("Instance Type: %s", node.Node.Labels["beta.kubernetes.io/instance-type"]),
+				fmt.Sprintf("Capacity Type: %s", node.Node.Labels["karpenter.sh/capacity-type"]),
 			),
 		)
 		if i%perRow == 0 {
@@ -282,7 +284,7 @@ func (m *Model) nodes() string {
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-func (m *Model) pods(node *state.Node, nodeStyle lipgloss.Style) string {
+func (m *Model) pods(node state.Node, nodeStyle lipgloss.Style) string {
 	var boxRows [][]string
 	perRow := m.GetBoxesPerRow(nodeStyle, podStyle)
 	pods := lo.MapToSlice(node.Pods, func(_ types.NamespacedName, v *corev1.Pod) *corev1.Pod { return v })
@@ -339,7 +341,7 @@ func StartControllers(ctx context.Context, config *rest.Config) *state.Cluster {
 	}
 
 	cluster := state.NewCluster(&clock.RealClock{}, kubeClient)
-	manager := state.NewManagerOrDie(ctx, config, controllerruntime.Options{})
+	manager := state.NewManagerOrDie(ctx, config)
 	if err := state.Register(ctx, manager, cluster); err != nil {
 		log.Fatalf("%v", err)
 	}

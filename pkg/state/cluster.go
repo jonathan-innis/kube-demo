@@ -194,7 +194,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 	return nil
 }
 
-func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, n *Node) error {
+func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, _ *Node) error {
 	var csiNode storagev1.CSINode
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: node.Name}, &csiNode); err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("getting CSINode to determine volume limit for %s, %w", node.Name, err)
@@ -299,6 +299,10 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	if bindingKnown {
 		if oldNodeName == pod.Spec.NodeName {
 			// we are already tracking the pod binding, so nothing to update
+			if err := c.ensureNodeCreated(ctx, oldNodeName); err != nil {
+				return err
+			}
+			c.nodes[oldNodeName].Pods[podKey] = pod
 			return nil
 		}
 		// the pod has switched nodes, this can occur if a pod name was re-used and it was deleted/re-created rapidly,
@@ -317,24 +321,10 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 		}
 	}
 
-	// did we notice that the pod is bound to a node and didn't know about the node before?
-	n, ok := c.nodes[pod.Spec.NodeName]
-	if !ok {
-		var node v1.Node
-		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, &node); err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("getting node, %w", err)
-		}
-
-		var err error
-		// node didn't exist, but creating it will pick up this newly bound pod as well
-		n, err = c.newNode(ctx, &node)
-		if err != nil {
-			// no need to delete c.nodes[node.Name] as it wasn't stored previously
-			return err
-		}
-		c.nodes[node.Name] = n
-		return nil
+	if err := c.ensureNodeCreated(ctx, pod.Spec.NodeName); err != nil {
+		return err
 	}
+	n := c.nodes[pod.Spec.NodeName]
 
 	// sum the newly bound pod's requests and limits into the existing node and record the binding
 	podRequests := resources.RequestsForPods(pod)
@@ -352,5 +342,26 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n.podLimits[podKey] = podLimits
 	n.Pods[podKey] = pod
 	c.bindings[podKey] = n.Node.Name
+	return nil
+}
+
+func (c *Cluster) ensureNodeCreated(ctx context.Context, nodeName string) error {
+	// did we notice that the pod is bound to a node and didn't know about the node before?
+	n, ok := c.nodes[nodeName]
+	if !ok {
+		var node v1.Node
+		if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodeName}, &node); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("getting node, %w", err)
+		}
+
+		var err error
+		// node didn't exist, but creating it will pick up this newly bound pod as well
+		n, err = c.newNode(ctx, &node)
+		if err != nil {
+			// no need to delete c.nodes[node.Name] as it wasn't stored previously
+			return err
+		}
+		c.nodes[node.Name] = n
+	}
 	return nil
 }
