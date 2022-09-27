@@ -29,8 +29,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	podutils "github.com/bwagner5/kube-demo/pkg/pod"
-	"github.com/bwagner5/kube-demo/pkg/resources"
+	podutils "github.com/bwagner5/kube-demo/pkg/utils"
 )
 
 type observerFunc func()
@@ -171,8 +170,8 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 		if podutils.IsTerminal(pod) {
 			continue
 		}
-		requests := resources.RequestsForPods(pod)
-		podLimits := resources.LimitsForPods(pod)
+		requests := podutils.RequestsForPods(pod)
+		podLimits := podutils.LimitsForPods(pod)
 		podKey := client.ObjectKeyFromObject(pod)
 		n.podRequests[podKey] = requests
 		n.podLimits[podKey] = podLimits
@@ -186,11 +185,11 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, node *v1.Node, n
 		limits = append(limits, podLimits)
 	}
 
-	n.DaemonSetRequested = resources.Merge(daemonsetRequested...)
-	n.DaemonSetLimits = resources.Merge(daemonsetLimits...)
-	n.PodTotalRequests = resources.Merge(requested...)
-	n.PodTotalLimits = resources.Merge(limits...)
-	n.Available = resources.Subtract(n.Allocatable, resources.Merge(requested...))
+	n.DaemonSetRequested = podutils.Merge(daemonsetRequested...)
+	n.DaemonSetLimits = podutils.Merge(daemonsetLimits...)
+	n.PodTotalRequests = podutils.Merge(requested...)
+	n.PodTotalLimits = podutils.Merge(limits...)
+	n.Available = podutils.Subtract(n.Allocatable, podutils.Merge(requested...))
 	return nil
 }
 
@@ -259,9 +258,9 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	}
 	// pod has been deleted so our available capacity increases by the resources that had been
 	// requested by the pod
-	n.Available = resources.Merge(n.Available, n.podRequests[podKey])
-	n.PodTotalRequests = resources.Subtract(n.PodTotalRequests, n.podRequests[podKey])
-	n.PodTotalLimits = resources.Subtract(n.PodTotalLimits, n.podLimits[podKey])
+	n.Available = podutils.Merge(n.Available, n.podRequests[podKey])
+	n.PodTotalRequests = podutils.Subtract(n.PodTotalRequests, n.podRequests[podKey])
+	n.PodTotalLimits = podutils.Subtract(n.PodTotalLimits, n.podLimits[podKey])
 	delete(n.podRequests, podKey)
 	delete(n.podLimits, podKey)
 	delete(n.Pods, podKey)
@@ -313,9 +312,9 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 			// left it
 			delete(c.bindings, podKey)
 			delete(n.Pods, podKey)
-			n.Available = resources.Merge(n.Available, n.podRequests[podKey])
-			n.PodTotalRequests = resources.Subtract(n.PodTotalRequests, n.podRequests[podKey])
-			n.PodTotalLimits = resources.Subtract(n.PodTotalLimits, n.podLimits[podKey])
+			n.Available = podutils.Merge(n.Available, n.podRequests[podKey])
+			n.PodTotalRequests = podutils.Subtract(n.PodTotalRequests, n.podRequests[podKey])
+			n.PodTotalLimits = podutils.Subtract(n.PodTotalLimits, n.podLimits[podKey])
 			delete(n.podRequests, podKey)
 			delete(n.podLimits, podKey)
 		}
@@ -327,16 +326,16 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n := c.nodes[pod.Spec.NodeName]
 
 	// sum the newly bound pod's requests and limits into the existing node and record the binding
-	podRequests := resources.RequestsForPods(pod)
-	podLimits := resources.LimitsForPods(pod)
+	podRequests := podutils.RequestsForPods(pod)
+	podLimits := podutils.LimitsForPods(pod)
 	// our available capacity goes down by the amount that the pod had requested
-	n.Available = resources.Subtract(n.Available, podRequests)
-	n.PodTotalRequests = resources.Merge(n.PodTotalRequests, podRequests)
-	n.PodTotalLimits = resources.Merge(n.PodTotalLimits, podLimits)
+	n.Available = podutils.Subtract(n.Available, podRequests)
+	n.PodTotalRequests = podutils.Merge(n.PodTotalRequests, podRequests)
+	n.PodTotalLimits = podutils.Merge(n.PodTotalLimits, podLimits)
 	// if it's a daemonset, we track what it has requested separately
 	if podutils.IsOwnedByDaemonSet(pod) {
-		n.DaemonSetRequested = resources.Merge(n.DaemonSetRequested, podRequests)
-		n.DaemonSetLimits = resources.Merge(n.DaemonSetRequested, podLimits)
+		n.DaemonSetRequested = podutils.Merge(n.DaemonSetRequested, podRequests)
+		n.DaemonSetLimits = podutils.Merge(n.DaemonSetRequested, podLimits)
 	}
 	n.podRequests[podKey] = podRequests
 	n.podLimits[podKey] = podLimits
