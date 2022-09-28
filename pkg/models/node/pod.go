@@ -1,4 +1,4 @@
-package views
+package node
 
 import (
 	"fmt"
@@ -8,8 +8,9 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/bwagner5/kube-demo/pkg/model/style"
+	"github.com/bwagner5/kube-demo/pkg/components"
 	"github.com/bwagner5/kube-demo/pkg/state"
+	"github.com/bwagner5/kube-demo/pkg/style"
 	podutils "github.com/bwagner5/kube-demo/pkg/utils/pod"
 )
 
@@ -44,7 +45,7 @@ func Pods(node *state.Node) string {
 
 func getPodsView(pods []*corev1.Pod) string {
 	var boxRows [][]string
-	perRow := GetBoxesPerRow(style.Node, style.Pod)
+	perRow := components.GetBoxesPerRow(style.Node, style.Pod)
 	row := -1
 	for i, pod := range pods {
 		if i%perRow == 0 {

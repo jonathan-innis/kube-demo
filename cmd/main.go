@@ -13,7 +13,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/bwagner5/kube-demo/pkg/model"
+	"github.com/bwagner5/kube-demo/pkg/models"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/utils/env"
 )
@@ -30,7 +30,7 @@ func main() {
 
 	ctx := context.Background()
 	cluster := startControllers(ctx, config)
-	p := tea.NewProgram(model.NewModel(cluster), tea.WithMouseCellMotion())
+	p := tea.NewProgram(models.NewModel(cluster), tea.WithMouseCellMotion())
 	if err := p.Start(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)

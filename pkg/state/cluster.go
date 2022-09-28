@@ -33,7 +33,7 @@ import (
 	podutils "github.com/bwagner5/kube-demo/pkg/utils/resources"
 )
 
-type observerFunc func()
+type observerFunc func(Event)
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
@@ -150,13 +150,13 @@ func (c *Cluster) AddOnChangeObserver(f observerFunc) {
 	c.updateObservers = append(c.updateObservers, f)
 }
 
-func (c *Cluster) notifyObservers() {
+func (c *Cluster) notifyObservers(evt Event) {
 	wg := &sync.WaitGroup{}
 	for _, observer := range c.updateObservers {
 		wg.Add(1)
 		go func(f observerFunc) {
 			defer wg.Done()
-			f()
+			f(evt)
 		}(observer)
 	}
 	wg.Wait()
@@ -230,8 +230,8 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, node *v1.Node, _ *No
 func (c *Cluster) deleteNode(nodeName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.notifyObservers(Event{Kind: NodeKind, Type: Delete, Obj: c.nodes[nodeName]})
 	delete(c.nodes, nodeName)
-	c.notifyObservers()
 }
 
 // updateNode is called for every node reconciliation
@@ -256,14 +256,13 @@ func (c *Cluster) updateNode(ctx context.Context, node *v1.Node) error {
 	if nodeCreationTime > atomic.LoadInt64(&c.lastNodeCreationTime) {
 		atomic.StoreInt64(&c.lastNodeCreationTime, nodeCreationTime)
 	}
-	c.notifyObservers()
+	c.notifyObservers(Event{Kind: NodeKind, Type: Update, Obj: c.nodes[node.Name]})
 	return nil
 }
 
 // deletePod is called when the pod has been deleted
 func (c *Cluster) deletePod(podKey types.NamespacedName) {
 	c.updateNodeUsageFromPodCompletion(podKey)
-	c.notifyObservers()
 }
 
 func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) {
@@ -280,6 +279,7 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	n, ok := c.nodes[nodeName]
 	if !ok {
 		// we weren't tracking the node yet, so nothing to do
+		c.notifyObservers(Event{Kind: PodKind, Type: Update})
 		return
 	}
 	// pod has been deleted so our available capacity increases by the resources that had been
@@ -294,6 +294,7 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	// We can't easily track the changes to the DaemonsetRequested here as we no longer have the pod.  We could keep up
 	// with this separately, but if a daemonset pod is being deleted, it usually means the node is going down.  In the
 	// worst case we will resync to correct this.
+	c.notifyObservers(Event{Kind: NodeKind, Type: Update, Obj: c.nodes[nodeName]})
 }
 
 // updatePod is called every time the pod is reconciled
@@ -304,7 +305,6 @@ func (c *Cluster) updatePod(ctx context.Context, pod *v1.Pod) error {
 	} else {
 		err = c.updateNodeUsageFromPod(ctx, pod)
 	}
-	c.notifyObservers()
 	return err
 }
 
@@ -318,6 +318,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	// nothing to do if the pod isn't bound, checking early allows avoiding unnecessary locking
 	if pod.Spec.NodeName == "" {
 		c.unboundPods[podKey] = pod
+		c.notifyObservers(Event{Kind: PodKind, Type: Update})
 		return nil
 	}
 	delete(c.unboundPods, podKey)
@@ -330,6 +331,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 				return err
 			}
 			c.nodes[oldNodeName].Pods[podKey] = pod
+			c.notifyObservers(Event{Kind: NodeKind, Type: Update, Obj: c.nodes[oldNodeName]})
 			return nil
 		}
 		// the pod has switched nodes, this can occur if a pod name was re-used and it was deleted/re-created rapidly,
@@ -369,6 +371,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 	n.podLimits[podKey] = podLimits
 	n.Pods[podKey] = pod
 	c.bindings[podKey] = n.Node.Name
+	c.notifyObservers(Event{Kind: NodeKind, Type: Update, Obj: c.nodes[pod.Spec.NodeName]})
 	return nil
 }
 
