@@ -11,6 +11,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/bwagner5/kube-demo/pkg/models/cluster"
+	"github.com/bwagner5/kube-demo/pkg/models/interactive"
 	"github.com/bwagner5/kube-demo/pkg/models/node"
 	"github.com/bwagner5/kube-demo/pkg/models/node_grid"
 	"github.com/bwagner5/kube-demo/pkg/state"
@@ -18,17 +19,18 @@ import (
 )
 
 type Model struct {
-	nodeGridModel  node_grid.Model
-	clusterModel   cluster.Model
-	viewType       ViewType
-	mode           Mode
-	selectedPod    int
-	toggleDetails  bool
-	stop           chan struct{}
-	k8sStateUpdate chan struct{}
-	help           help.Model
-	events         <-chan state.Event
-	viewport       viewport.Model
+	nodeGridModel    node_grid.Model
+	clusterModel     cluster.Model
+	interactiveModel interactive.Model
+	viewType         ViewType
+	mode             Mode
+	selectedPod      int
+	toggleDetails    bool
+	stop             chan struct{}
+	k8sStateUpdate   chan struct{}
+	help             help.Model
+	events           <-chan state.Event
+	viewport         viewport.Model
 }
 
 func NewModel(c *state.Cluster) Model {
@@ -36,14 +38,15 @@ func NewModel(c *state.Cluster) Model {
 	events := make(chan state.Event, 100)
 	c.AddOnChangeObserver(func(evt state.Event) { events <- evt })
 	return Model{
-		nodeGridModel: node_grid.NewModel(),
-		clusterModel:  cluster.NewModel(c),
-		stop:          stop,
-		events:        events,
-		help:          help.New(),
-		viewType:      NodeView,
-		mode:          View,
-		viewport:      viewport.New(0, 0),
+		nodeGridModel:    node_grid.NewModel(),
+		clusterModel:     cluster.NewModel(c),
+		interactiveModel: interactive.NewModel(),
+		stop:             stop,
+		events:           events,
+		help:             help.New(),
+		viewType:         NodeView,
+		mode:             View,
+		viewport:         viewport.New(0, 0),
 	}
 }
 
@@ -165,7 +168,6 @@ func (m Model) View() string {
 		canvas.WriteString("Hello you are in pod view now :)")
 		return style.Canvas.Render(canvas.String())
 	case NodeView:
-
 		canvas.WriteString(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -173,12 +175,11 @@ func (m Model) View() string {
 				m.clusterModel.View(),
 			),
 		)
-		var interactiveLine string
-		if m.mode == Interactive {
-			interactiveLine = "You are interactive mode!"
-		}
 		_ = physicalHeight - strings.Count(canvas.String(), "\n")
-		return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 10)) + "\n" + interactiveLine + "\n" + m.help.View(keyMappings)
+		if m.mode == Interactive {
+			return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.interactiveModel.View() + "\n" + m.help.View(keyMappings)
+		}
+		return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)
 	}
 	return ""
 }
