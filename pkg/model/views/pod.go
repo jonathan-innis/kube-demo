@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/charmbracelet/lipgloss"
@@ -35,6 +36,9 @@ func Pods(node *state.Node) string {
 		}
 		return iCreated < jCreated
 	})
+	if len(pods) > 50 {
+		return fmt.Sprintf("%s\n[and %d more pods]", getPodsView(pods[:50]), len(pods)-50)
+	}
 	return getPodsView(pods)
 }
 

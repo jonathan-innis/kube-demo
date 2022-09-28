@@ -10,3 +10,25 @@ func GetCondition(n *v1.Node, match v1.NodeConditionType) v1.NodeCondition {
 	}
 	return v1.NodeCondition{}
 }
+
+type Status string
+
+const (
+	Unknown  Status = "Unknown"
+	Ready    Status = "Ready"
+	NotReady Status = "NotReady"
+	Cordoned Status = "Cordoned"
+)
+
+func GetReadyStatus(node *v1.Node) Status {
+	switch {
+	case node.Spec.Unschedulable:
+		return Cordoned
+	case GetCondition(node, v1.NodeReady).Status == v1.ConditionTrue:
+		return Ready
+	case GetCondition(node, v1.NodeReady).Status == v1.ConditionFalse:
+		return NotReady
+	default:
+		return Unknown
+	}
+}

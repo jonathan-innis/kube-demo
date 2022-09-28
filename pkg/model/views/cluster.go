@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
@@ -9,21 +10,41 @@ import (
 
 	"github.com/bwagner5/kube-demo/pkg/model/components"
 	"github.com/bwagner5/kube-demo/pkg/model/style"
-	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/utils/resources"
 )
 
-func Cluster(nodes []*state.Node, unboundPods []*v1.Pod) string {
+type NodeStartupMetadata struct {
+	LongestTimeToReady  time.Duration
+	ShortestTimeToReady time.Duration
+	AverageTimeToReady  time.Duration
+
+	TotalSeconds int64
+	Count        int64
+}
+
+func Cluster(nodes []*NodeModel, unboundPods []*v1.Pod, metadata *NodeStartupMetadata) string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		"Cluster",
 		style.Separator,
+		timeToReadyStats(metadata),
 		fmt.Sprintf("Unbound Pods Count: %d", len(unboundPods)),
 		clusterUtilization(nodes),
 	)
 }
 
-func clusterUtilization(nodes []*state.Node) string {
+func timeToReadyStats(metadata *NodeStartupMetadata) string {
+	return lipgloss.JoinHorizontal(lipgloss.Left,
+		fmt.Sprintf("Time To Ready %s ", style.Separator),
+		fmt.Sprintf("Average - %v", metadata.AverageTimeToReady),
+		"\t",
+		fmt.Sprintf("Longest - %v", metadata.LongestTimeToReady),
+		"\t",
+		fmt.Sprintf("Shortest - %v", metadata.ShortestTimeToReady),
+	)
+}
+
+func clusterUtilization(nodes []*NodeModel) string {
 	allocatable := v1.ResourceList{}
 	used := v1.ResourceList{}
 	for _, node := range nodes {

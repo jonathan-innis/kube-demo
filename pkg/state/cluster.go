@@ -373,7 +373,6 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *v1.Pod) error
 }
 
 func (c *Cluster) ensureNodeCreated(ctx context.Context, nodeName string) error {
-	// did we notice that the pod is bound to a node and didn't know about the node before?
 	_, ok := c.nodes[nodeName]
 	if !ok {
 		var node v1.Node

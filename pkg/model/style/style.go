@@ -17,7 +17,7 @@ var Node = lipgloss.NewStyle().
 var Pod = lipgloss.NewStyle().
 	Align(lipgloss.Bottom).
 	Foreground(White).
-	Border(lipgloss.NormalBorder(), true).
+	Border(lipgloss.RoundedBorder(), true).
 	BorderForeground(defaultPodBorder).
 	Margin(0).
 	Padding(0).

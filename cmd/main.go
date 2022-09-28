@@ -30,7 +30,7 @@ func main() {
 
 	ctx := context.Background()
 	cluster := startControllers(ctx, config)
-	p := tea.NewProgram(model.NewModel(cluster))
+	p := tea.NewProgram(model.NewModel(cluster), tea.WithMouseCellMotion())
 	if err := p.Start(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)

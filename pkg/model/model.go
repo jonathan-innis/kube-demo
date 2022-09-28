@@ -1,49 +1,57 @@
 package model
 
 import (
+	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/samber/lo"
 	"golang.org/x/term"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/bwagner5/kube-demo/pkg/model/style"
 	"github.com/bwagner5/kube-demo/pkg/model/views"
 	"github.com/bwagner5/kube-demo/pkg/state"
+	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
 )
 
 type k8sStateChange struct{}
 
 type Model struct {
-	cluster        *state.Cluster
-	storedNodes    []*state.Node
-	unboundPods    []*v1.Pod
-	viewType       views.ViewType
-	selectedNode   int
-	selectedPod    int
-	podSelection   bool
-	toggleDetails  bool
-	stop           chan struct{}
-	k8sStateUpdate chan struct{}
-	help           help.Model
-	events         <-chan struct{}
-	viewport       viewport.Model
+	cluster             *state.Cluster
+	storedNodes         map[string]*views.NodeModel
+	nodeStartupMetadata *views.NodeStartupMetadata
+	unboundPods         []*v1.Pod
+	viewType            views.ViewType
+	selectedNode        int
+	selectedPod         int
+	toggleDetails       bool
+	stop                chan struct{}
+	k8sStateUpdate      chan struct{}
+	help                help.Model
+	events              <-chan struct{}
+	viewport            viewport.Model
 }
 
 func NewModel(cluster *state.Cluster) *Model {
 	stop := make(chan struct{})
 	events := make(chan struct{}, 100)
 	model := &Model{
-		cluster:  cluster,
-		stop:     stop,
-		events:   events,
-		help:     help.New(),
-		viewType: views.NodeView,
-		viewport: viewport.New(0, 0),
+		cluster:             cluster,
+		storedNodes:         map[string]*views.NodeModel{},
+		nodeStartupMetadata: &views.NodeStartupMetadata{},
+		stop:                stop,
+		events:              events,
+		help:                help.New(),
+		viewType:            views.NodeView,
+		viewport:            viewport.New(0, 0),
 	}
 	cluster.AddOnChangeObserver(func() { events <- struct{}{} })
 	return model
@@ -95,21 +103,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewType = views.PodDetailView
 			}
 		case views.NodeDetailView, views.PodDetailView:
-			// Handle keyboard and mouse events in the viewport
+			// Handle keyboard events in the viewport
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+	case tea.MouseMsg:
+		switch m.viewType {
+		case views.NodeDetailView, views.PodDetailView:
+			// Handle mouse events in the viewport
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 	case k8sStateChange:
-		return m, func() tea.Msg {
+		cmds = append(cmds, func() tea.Msg {
 			select {
 			case <-m.events:
-				m.storedNodes = []*state.Node{}
 				m.unboundPods = []*v1.Pod{}
+				nodeNames := sets.NewString(lo.Keys(m.storedNodes)...)
 				m.cluster.ForEachNode(func(n *state.Node) bool {
-					m.storedNodes = append(m.storedNodes, n)
+					if _, ok := m.storedNodes[n.Node.Name]; !ok {
+						m.storedNodes[n.Node.Name] = views.NewNodeModel(n)
+					}
+					m.storedNodes[n.Node.Name].Node = n
+					nodeNames.Delete(n.Node.Name)
 					return true
 				})
+				// Cleanup old nodes that have been removed from the cluster state
+				for name := range nodeNames {
+					delete(m.storedNodes, name)
+				}
 				m.cluster.ForEachUnboundPod(func(p *v1.Pod) bool {
 					m.unboundPods = append(m.unboundPods, p)
 					return true
@@ -118,7 +142,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case <-m.stop:
 				return nil
 			}
+		})
+	}
+	// Update all the node stopwatches
+	// Keep track of which stopwatches should be started and stopped and update node uptime metadata
+	for _, elem := range m.storedNodes {
+		var cmd tea.Cmd
+		if !elem.BeenReady && nodeutils.GetReadyStatus(elem.Node.Node) == nodeutils.Ready {
+			cmds = append(cmds, elem.StopWatch.Stop())
+			elem.BeenReady = true
+
+			if elem.StopWatch.Elapsed().Seconds() > m.nodeStartupMetadata.LongestTimeToReady.Seconds() {
+				m.nodeStartupMetadata.LongestTimeToReady = elem.StopWatch.Elapsed()
+			}
+			if elem.StopWatch.Elapsed().Seconds() < m.nodeStartupMetadata.ShortestTimeToReady.Seconds() {
+				m.nodeStartupMetadata.ShortestTimeToReady = elem.StopWatch.Elapsed()
+			}
+			m.nodeStartupMetadata.Count++
+			m.nodeStartupMetadata.TotalSeconds += int64(elem.StopWatch.Elapsed().Seconds())
+			if m.nodeStartupMetadata.Count != 0 {
+				m.nodeStartupMetadata.AverageTimeToReady = lo.Must(time.ParseDuration(fmt.Sprintf("%ds", m.nodeStartupMetadata.TotalSeconds/m.nodeStartupMetadata.Count)))
+			}
 		}
+		if elem.JustCreated && !elem.BeenReady {
+			cmds = append(cmds, elem.StopWatch.Start())
+			elem.JustCreated = false
+		}
+		elem.StopWatch, cmd = elem.StopWatch.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -170,6 +221,15 @@ func mod(a, b int) int {
 }
 
 func (m *Model) View() string {
+	listView := lo.Values(m.storedNodes)
+	sort.SliceStable(listView, func(i, j int) bool {
+		iCreated := listView[i].Node.Node.CreationTimestamp.Unix()
+		jCreated := listView[j].Node.Node.CreationTimestamp.Unix()
+		if iCreated == jCreated {
+			return string(listView[i].Node.Node.UID) < string(listView[j].Node.Node.UID)
+		}
+		return iCreated < jCreated
+	})
 	var canvas strings.Builder
 	physicalWidth, physicalHeight, _ := term.GetSize(int(os.Stdout.Fd()))
 	style.Canvas = style.Canvas.MaxWidth(physicalWidth).Width(physicalWidth)
@@ -178,7 +238,7 @@ func (m *Model) View() string {
 		m.viewport.Height = physicalHeight
 		m.viewport.Width = physicalWidth
 
-		m.viewport.SetContent(views.GetNodeViewportContent(m.storedNodes[m.selectedNode].Node))
+		m.viewport.SetContent(views.GetNodeViewportContent(listView[m.selectedNode].Node.Node))
 		return m.viewport.View()
 	case views.PodDetailView:
 		canvas.WriteString("Hello you are in pod detail view now :)")
@@ -190,8 +250,8 @@ func (m *Model) View() string {
 		canvas.WriteString(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				views.Nodes(m.selectedNode, m.storedNodes),
-				views.Cluster(m.storedNodes, m.unboundPods),
+				views.Nodes(m.selectedNode, listView),
+				views.Cluster(listView, m.unboundPods, m.nodeStartupMetadata),
 			),
 		)
 		_ = physicalHeight - strings.Count(canvas.String(), "\n")

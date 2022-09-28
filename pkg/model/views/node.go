@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/stopwatch"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -14,15 +15,34 @@ import (
 	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
 )
 
-func Nodes(selectedNode int, nodes []*state.Node) string {
+type NodeModel struct {
+	*state.Node
+	StopWatch   stopwatch.Model
+	Seen        bool
+	JustCreated bool
+	BeenReady   bool
+}
+
+func NewNodeModel(n *state.Node) *NodeModel {
+	s := stopwatch.New()
+	return &NodeModel{
+		Node:        n,
+		StopWatch:   s,
+		Seen:        true,
+		JustCreated: true,
+		BeenReady:   false,
+	}
+}
+
+func Nodes(selectedNode int, nodes []*NodeModel) string {
 	var boxRows [][]string
 	row := -1
 	perRow := GetBoxesPerRow(style.Canvas, style.Node)
 	for i, node := range nodes {
 		var color lipgloss.Color
-		readyConditionStatus := nodeutils.GetCondition(node.Node, corev1.NodeReady).Status
+		readyConditionStatus := nodeutils.GetCondition(node.Node.Node, corev1.NodeReady).Status
 		switch {
-		case node.Node.Spec.Unschedulable:
+		case node.Node.Node.Spec.Unschedulable:
 			color = style.Orange
 		case readyConditionStatus == "False":
 			color = style.Red
@@ -36,16 +56,16 @@ func Nodes(selectedNode int, nodes []*state.Node) string {
 		}
 		box := style.Node.Copy().BorderBackground(color).Render(
 			lipgloss.JoinVertical(lipgloss.Left,
-				node.Node.Name,
-				Pods(node),
+				node.Node.Node.Name,
+				Pods(node.Node),
 				style.Separator,
-				DaemonSetPods(node),
+				DaemonSetPods(node.Node),
 				"\n",
 				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 					ViewAs(float64(node.PodTotalRequests.Cpu().Value())/float64(node.Allocatable.Cpu().Value())),
 				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 					ViewAs(float64(node.PodTotalRequests.Memory().Value())/float64(node.Allocatable.Memory().Value())),
-				fmt.Sprintf("\nStatus: %s", getNodeStatus(node.Node)),
+				fmt.Sprintf("\nStatus: %s", nodeutils.GetReadyStatus(node.Node.Node)),
 				getMetadata(node),
 			),
 		)
@@ -61,11 +81,12 @@ func Nodes(selectedNode int, nodes []*state.Node) string {
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-func getMetadata(node *state.Node) string {
+func getMetadata(node *NodeModel) string {
 	return strings.Join([]string{
+		fmt.Sprintf("Time to Ready: %v", node.StopWatch.View()),
 		fmt.Sprintf("Pods: %d", len(node.Pods)),
-		fmt.Sprintf("Instance Type: %s", getValueOrDefault(node.Node.Labels, "beta.kubernetes.io/instance-type", "Unknown")),
-		fmt.Sprintf("Capacity Type: %s", getValueOrDefault(node.Node.Labels, "karpenter.sh/capacity-type", "Unknown")),
+		fmt.Sprintf("Instance Type: %s", getValueOrDefault(node.Node.Node.Labels, "beta.kubernetes.io/instance-type", "Unknown")),
+		fmt.Sprintf("Capacity Type: %s", getValueOrDefault(node.Node.Node.Labels, "karpenter.sh/capacity-type", "Unknown")),
 	}, "\n")
 }
 
@@ -75,26 +96,4 @@ func getValueOrDefault[K comparable, V any](m map[K]V, k K, d V) V {
 		return d
 	}
 	return v
-}
-
-type NodeStatus string
-
-const (
-	Unknown  NodeStatus = "Unknown"
-	Ready    NodeStatus = "Ready"
-	NotReady NodeStatus = "NotReady"
-	Cordoned NodeStatus = "Cordoned"
-)
-
-func getNodeStatus(node *corev1.Node) NodeStatus {
-	switch {
-	case node.Spec.Unschedulable:
-		return Cordoned
-	case nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionTrue:
-		return Ready
-	case nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionFalse:
-		return NotReady
-	default:
-		return Unknown
-	}
 }
