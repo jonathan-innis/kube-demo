@@ -45,7 +45,7 @@ func Nodes(selectedNode int, nodes []*state.Node) string {
 					ViewAs(float64(node.PodTotalRequests.Cpu().Value())/float64(node.Allocatable.Cpu().Value())),
 				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 					ViewAs(float64(node.PodTotalRequests.Memory().Value())/float64(node.Allocatable.Memory().Value())),
-				fmt.Sprintf("\nReady: %s", nodeutils.GetCondition(node.Node, corev1.NodeReady).Status),
+				fmt.Sprintf("\nStatus: %s", getNodeStatus(node.Node)),
 				getMetadata(node),
 			),
 		)
@@ -75,4 +75,26 @@ func getValueOrDefault[K comparable, V any](m map[K]V, k K, d V) V {
 		return d
 	}
 	return v
+}
+
+type NodeStatus string
+
+const (
+	Unknown  NodeStatus = "Unknown"
+	Ready    NodeStatus = "Ready"
+	NotReady NodeStatus = "NotReady"
+	Cordoned NodeStatus = "Cordoned"
+)
+
+func getNodeStatus(node *corev1.Node) NodeStatus {
+	switch {
+	case node.Spec.Unschedulable:
+		return Cordoned
+	case nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionTrue:
+		return Ready
+	case nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionFalse:
+		return NotReady
+	default:
+		return Unknown
+	}
 }

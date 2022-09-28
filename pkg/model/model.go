@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
-	"gopkg.in/yaml.v3"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/bwagner5/kube-demo/pkg/model/style"
@@ -23,10 +22,11 @@ type Model struct {
 	cluster        *state.Cluster
 	storedNodes    []*state.Node
 	unboundPods    []*v1.Pod
+	viewType       views.ViewType
 	selectedNode   int
 	selectedPod    int
 	podSelection   bool
-	details        bool
+	toggleDetails  bool
 	stop           chan struct{}
 	k8sStateUpdate chan struct{}
 	help           help.Model
@@ -42,6 +42,7 @@ func NewModel(cluster *state.Cluster) *Model {
 		stop:     stop,
 		events:   events,
 		help:     help.New(),
+		viewType: views.NodeView,
 		viewport: viewport.New(0, 0),
 	}
 	cluster.AddOnChangeObserver(func() { events <- struct{}{} })
@@ -56,18 +57,48 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			close(m.stop)
 			return m, tea.Quit
-		case "left", "right", "up", "down":
-			m.selectedNode = m.moveCursor(msg)
+		case "esc", "q":
+			switch m.viewType {
+			case views.NodeView, views.NodeDetailView:
+				m.viewType = views.NodeView
+			case views.PodView:
+				m.viewType = views.NodeView
+			default:
+				m.viewType = views.PodView
+			}
 		case "enter":
-			m.details = !m.details
-		case "?":
-			m.help.ShowAll = !m.help.ShowAll
+			switch m.viewType {
+			case views.NodeView, views.PodView:
+				m.viewType = views.PodView
+			}
+		}
+		switch m.viewType {
+		case views.NodeView:
+			switch msg.String() {
+			case "left", "right", "up", "down":
+				m.selectedNode = m.moveCursor(msg)
+			case "?":
+				m.help.ShowAll = !m.help.ShowAll
+			case "v", "d":
+				m.viewType = views.NodeDetailView
+			}
+		case views.PodView:
+			switch msg.String() {
+			case "v", "d":
+				m.viewType = views.PodDetailView
+			}
+		case views.NodeDetailView, views.PodDetailView:
+			// Handle keyboard and mouse events in the viewport
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			cmds = append(cmds, cmd)
 		}
 	case k8sStateChange:
 		return m, func() tea.Msg {
@@ -89,7 +120,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	return m, nil
+	return m, tea.Batch(cmds...)
 }
 
 func (m *Model) moveCursor(key tea.KeyMsg) int {
@@ -139,29 +170,32 @@ func mod(a, b int) int {
 }
 
 func (m *Model) View() string {
+	var canvas strings.Builder
 	physicalWidth, physicalHeight, _ := term.GetSize(int(os.Stdout.Fd()))
-	if m.details {
+	style.Canvas = style.Canvas.MaxWidth(physicalWidth).Width(physicalWidth)
+	switch m.viewType {
+	case views.NodeDetailView:
 		m.viewport.Height = physicalHeight
 		m.viewport.Width = physicalWidth
 
-		out, err := yaml.Marshal(m.storedNodes[m.selectedNode].Node.Spec)
-		if err == nil {
-			m.viewport.SetContent(string(out))
-		}
-		if err != nil {
-			panic(err)
-		}
+		m.viewport.SetContent(views.GetNodeViewportContent(m.storedNodes[m.selectedNode].Node))
 		return m.viewport.View()
+	case views.PodDetailView:
+		canvas.WriteString("Hello you are in pod detail view now :)")
+		return style.Canvas.Render(canvas.String())
+	case views.PodView:
+		canvas.WriteString("Hello you are in pod view now :)")
+		return style.Canvas.Render(canvas.String())
+	case views.NodeView:
+		canvas.WriteString(
+			lipgloss.JoinVertical(
+				lipgloss.Left,
+				views.Nodes(m.selectedNode, m.storedNodes),
+				views.Cluster(m.storedNodes, m.unboundPods),
+			),
+		)
+		_ = physicalHeight - strings.Count(canvas.String(), "\n")
+		return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)
 	}
-	style.Canvas = style.Canvas.MaxWidth(physicalWidth).Width(physicalWidth)
-	var canvas strings.Builder
-	canvas.WriteString(
-		lipgloss.JoinVertical(
-			lipgloss.Left,
-			views.Nodes(m.selectedNode, m.storedNodes),
-			views.Cluster(m.storedNodes, m.unboundPods),
-		),
-	)
-	_ = physicalHeight - strings.Count(canvas.String(), "\n")
-	return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)
+	return ""
 }

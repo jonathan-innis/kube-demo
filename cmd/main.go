@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"k8s.io/client-go/rest"
@@ -14,10 +15,15 @@ import (
 
 	"github.com/bwagner5/kube-demo/pkg/model"
 	"github.com/bwagner5/kube-demo/pkg/state"
+	"github.com/bwagner5/kube-demo/pkg/utils/env"
+)
+
+var (
+	defaultKubeConfigPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 )
 
 func main() {
-	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+	config, err := clientcmd.BuildConfigFromFlags("", env.WithDefaultString("KUBECONFIG", defaultKubeConfigPath))
 	if err != nil {
 		log.Fatalf("could not initialize kubeconfig: %v", err)
 	}

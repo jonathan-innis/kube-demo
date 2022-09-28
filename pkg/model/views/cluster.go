@@ -18,7 +18,7 @@ func Cluster(nodes []*state.Node, unboundPods []*v1.Pod) string {
 		lipgloss.Left,
 		"Cluster",
 		style.Separator,
-		fmt.Sprintf("Unbound Pods Count: %d\n", len(unboundPods)),
+		fmt.Sprintf("Unbound Pods Count: %d", len(unboundPods)),
 		clusterUtilization(nodes),
 	)
 }
@@ -31,7 +31,7 @@ func clusterUtilization(nodes []*state.Node) string {
 		used = resources.Merge(used, node.PodTotalRequests)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Left,
-		"Utilization\t--\t",
+		fmt.Sprintf("Utilization %s ", style.Separator),
 		components.UtilizationBar("CPU", used.Cpu().Value(), allocatable.Cpu().Value(), progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding())),
 		"\t",
 		components.UtilizationBar("Memory", used.Memory().Value(), allocatable.Memory().Value(), progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding())),
