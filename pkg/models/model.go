@@ -38,7 +38,7 @@ func NewModel(c *state.Cluster) Model {
 	events := make(chan state.Event, 100)
 	c.AddOnChangeObserver(func(evt state.Event) { events <- evt })
 	return Model{
-		nodeGridModel:    grid.NewModel[node.Model, node.UpdateMsg, node.DeleteMsg](),
+		nodeGridModel:    grid.NewModel[node.Model, node.UpdateMsg, node.DeleteMsg](&style.Canvas, node.GridUpdate, node.GridDelete),
 		clusterModel:     cluster.NewModel(c),
 		interactiveModel: interactive.NewModel(),
 		stop:             stop,
@@ -120,7 +120,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
 		}
-	case startWatchMsg, node.CreateMsg, node.UpdateMsg, node.DeleteMsg, cluster.UnboundPodsUpdateMsg:
+	case startWatchMsg, node.UpdateMsg, node.DeleteMsg, cluster.UnboundPodsUpdateMsg:
 		cmds = append(cmds, func() tea.Msg {
 			select {
 			case evt := <-m.events:

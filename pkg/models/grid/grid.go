@@ -11,14 +11,29 @@ import (
 	"github.com/bwagner5/kube-demo/pkg/style"
 )
 
+type modelUpdateFunc[T Interface[T, U], U, D MessageInterface] func(*Model[T, U, D], U)
+type modelDeleteFunc[T Interface[T, U], U, D MessageInterface] func(*Model[T, U, D], D)
+
 type Model[T Interface[T, U], U, D MessageInterface] struct {
-	models       map[string]T
-	selectedNode int
+	containerStyle    *lipgloss.Style
+	subContainerStyle *lipgloss.Style
+
+	Models map[string]T
+
+	onUpdate modelUpdateFunc[T, U, D]
+	onDelete modelDeleteFunc[T, U, D]
+	selected int
 }
 
-func NewModel[T Interface[T, U], U, D MessageInterface]() Model[T, U, D] {
+func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle *lipgloss.Style, onUpdate modelUpdateFunc[T, U, D], onDelete modelDeleteFunc[T, U, D]) Model[T, U, D] {
+	subContainer := *new(T)
 	return Model[T, U, D]{
-		models: map[string]T{},
+		containerStyle:    containerStyle,
+		subContainerStyle: subContainer.GetStyle(),
+		Models:            map[string]T{},
+
+		onUpdate: onUpdate,
+		onDelete: onDelete,
 	}
 }
 
@@ -31,18 +46,15 @@ func (m Model[T, U, D]) Update(msg tea.Msg) (Model[T, U, D], tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "left", "right", "up", "down":
-			m.selectedNode = m.moveCursor(msg)
+			m.selected = m.moveCursor(msg)
 		}
 	case U:
-		if _, ok := m.models[msg.GetID()]; !ok {
-			model := *new(T)
-			m.models[msg.GetID()] = model.InitFromMsg(msg)
-		}
+		m.onUpdate(&m, msg)
 	case D:
-		delete(m.models, msg.GetID())
+		m.onDelete(&m, msg)
 	}
-	for k, v := range m.models {
-		m.models[k], cmd = v.Update(msg)
+	for k, v := range m.Models {
+		m.Models[k], cmd = v.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 	return m, tea.Batch(cmds...)
@@ -52,15 +64,15 @@ func (m Model[T, U, D]) View() string {
 	listView := m.listView()
 	var boxRows [][]string
 	row := -1
-	perRow := components.GetBoxesPerRow(style.Canvas, style.Node)
+	perRow := components.GetBoxesPerRow(*m.containerStyle, *m.subContainerStyle)
 	for i, elem := range listView {
 		if i%perRow == 0 {
 			row++
 			boxRows = append(boxRows, []string{})
 		}
-		if i == m.selectedNode {
+		if i == m.selected {
 			boxRows[row] = append(boxRows[row], elem.View(
-				func(s lipgloss.Style) lipgloss.Style { return s.BorderBackground(style.SelectedNodeBorder) }),
+				func(s lipgloss.Style) lipgloss.Style { return s.BorderBackground(style.SelectedBorder) }),
 			)
 		} else {
 			boxRows[row] = append(boxRows[row], elem.View())
@@ -73,12 +85,12 @@ func (m Model[T, U, D]) View() string {
 }
 
 func (m Model[T, U, D]) Viewport() string {
-	listView := lo.Values(m.models)
-	return listView[m.selectedNode].GetViewportContent()
+	listView := lo.Values(m.Models)
+	return listView[m.selected].GetViewportContent()
 }
 
 func (m Model[T, U, D]) listView() []T {
-	listView := lo.Values(m.models)
+	listView := lo.Values(m.Models)
 
 	sort.SliceStable(listView, func(i, j int) bool {
 		iCreated := listView[i].GetCreationTimestamp()
@@ -92,25 +104,25 @@ func (m Model[T, U, D]) listView() []T {
 }
 
 func (m Model[T, U, D]) moveCursor(key tea.KeyMsg) int {
-	totalObjects := len(m.models)
-	perRow := components.GetBoxesPerRow(style.Canvas, style.Node)
+	totalObjects := len(m.Models)
+	perRow := components.GetBoxesPerRow(*m.containerStyle, *m.subContainerStyle)
 	switch key.String() {
 	case "right":
-		rowNum := m.selectedNode / perRow
-		index := m.selectedNode + 1
+		rowNum := m.selected / perRow
+		index := m.selected + 1
 		if index >= totalObjects {
 			return index - index%perRow
 		}
 		return rowNum*perRow + index%perRow
 	case "left":
-		rowNum := m.selectedNode / perRow
-		index := rowNum*perRow + mod(m.selectedNode-1, perRow)
+		rowNum := m.selected / perRow
+		index := rowNum*perRow + mod(m.selected-1, perRow)
 		if index >= totalObjects {
 			return totalObjects - 1
 		}
 		return index
 	case "up":
-		index := m.selectedNode - perRow
+		index := m.selected - perRow
 		col := mod(index, perRow)
 		bottomRow := totalObjects / perRow
 		if index < 0 {
@@ -122,7 +134,7 @@ func (m Model[T, U, D]) moveCursor(key tea.KeyMsg) int {
 		}
 		return index
 	case "down":
-		index := m.selectedNode + perRow
+		index := m.selected + perRow
 		if index >= totalObjects {
 			return index % perRow
 		}

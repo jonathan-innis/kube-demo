@@ -13,9 +13,11 @@ import (
 	"github.com/bwagner5/kube-demo/pkg/components"
 	"github.com/bwagner5/kube-demo/pkg/models/grid"
 	"github.com/bwagner5/kube-demo/pkg/models/metadata"
+	"github.com/bwagner5/kube-demo/pkg/models/pod"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/style"
 	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
+	podutils "github.com/bwagner5/kube-demo/pkg/utils/pod"
 )
 
 type Model struct {
@@ -25,11 +27,6 @@ type Model struct {
 	Seen        bool
 	JustCreated bool
 	BeenReady   bool
-}
-
-type CreateMsg struct {
-	ID   string
-	Node *state.Node
 }
 
 type UpdateMsg struct {
@@ -60,12 +57,6 @@ func NewModel(n *state.Node) Model {
 		JustCreated: true,
 		BeenReady:   false,
 	}
-}
-
-func (m Model) InitFromMsg(msg UpdateMsg) Model {
-	m.id = msg.Node.Node.Name
-	m.Node = msg.Node
-	return m
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -109,12 +100,14 @@ func (m Model) View(overrides ...grid.ViewOverride) string {
 	for _, override := range overrides {
 		node = override(node)
 	}
+
+	podGrid, daemonSetPodGrid := m.getPodGrids()
 	return node.Render(
 		lipgloss.JoinVertical(lipgloss.Left,
 			m.Node.Node.Name,
-			Pods(m.Node),
+			podGrid.View(),
 			style.Separator,
-			DaemonSetPods(m.Node),
+			daemonSetPodGrid.View(),
 			"\n",
 			progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 				ViewAs(float64(m.Node.PodTotalRequests.Cpu().Value())/float64(m.Node.Allocatable.Cpu().Value())),
@@ -138,6 +131,10 @@ func (m Model) GetUID() string {
 	return string(m.Node.Node.UID)
 }
 
+func (m Model) GetStyle() *lipgloss.Style {
+	return &style.Node
+}
+
 func getMetadata(m Model) string {
 	return strings.Join([]string{
 		fmt.Sprintf("Time to Ready: %v", m.StopWatch.View()),
@@ -153,4 +150,18 @@ func getValueOrDefault[K comparable, V any](m map[K]V, k K, d V) V {
 		return d
 	}
 	return v
+}
+
+func (m Model) getPodGrids() (grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg], grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]) {
+	podGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, nil, nil)
+	daemonSetPodGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, nil, nil)
+
+	for k, v := range m.Node.Pods {
+		if !podutils.IsOwnedByDaemonSet(v) {
+			podGrid.Models[k.String()] = pod.NewModel(v)
+		} else {
+			daemonSetPodGrid.Models[k.String()] = pod.NewModel(v)
+		}
+	}
+	return podGrid, daemonSetPodGrid
 }

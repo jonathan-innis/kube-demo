@@ -34,7 +34,7 @@ const (
 	Yellow = lipgloss.Color("#FFFF00")
 	Red    = lipgloss.Color("#FF0000")
 
-	SelectedNodeBorder = Pink
+	SelectedBorder = Pink
 
 	Separator = "-----------"
 )

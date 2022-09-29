@@ -8,12 +8,12 @@ import (
 type ViewOverride func(lipgloss.Style) lipgloss.Style
 
 type Interface[T any, U tea.Msg] interface {
-	InitFromMsg(U) T
 	Update(tea.Msg) (T, tea.Cmd)
 	View(...ViewOverride) string
 	GetViewportContent() string
 	GetCreationTimestamp() int64
 	GetUID() string
+	GetStyle() *lipgloss.Style
 }
 
 type MessageInterface interface {
