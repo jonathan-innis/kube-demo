@@ -1,6 +1,7 @@
 package grid
 
 import (
+	"fmt"
 	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,7 +23,10 @@ type Model[T Interface[T, U], U, D MessageInterface] struct {
 
 	onUpdate modelUpdateFunc[T, U, D]
 	onDelete modelDeleteFunc[T, U, D]
-	selected int
+
+	// View-related options
+	selected      int
+	MaxItemsShown int
 }
 
 func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle *lipgloss.Style, onUpdate modelUpdateFunc[T, U, D], onDelete modelDeleteFunc[T, U, D]) Model[T, U, D] {
@@ -34,6 +38,8 @@ func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle *lipgloss
 
 		onUpdate: onUpdate,
 		onDelete: onDelete,
+
+		MaxItemsShown: 50,
 	}
 }
 
@@ -61,7 +67,13 @@ func (m Model[T, U, D]) Update(msg tea.Msg) (Model[T, U, D], tea.Cmd) {
 }
 
 func (m Model[T, U, D]) View() string {
+	var extraInfo string
 	listView := m.listView()
+
+	if len(listView) > m.MaxItemsShown {
+		extraInfo = fmt.Sprintf("[and %d others]", len(listView)-m.MaxItemsShown)
+		listView = listView[:m.MaxItemsShown]
+	}
 	var boxRows [][]string
 	row := -1
 	perRow := components.GetBoxesPerRow(*m.containerStyle, *m.subContainerStyle)
@@ -81,6 +93,7 @@ func (m Model[T, U, D]) View() string {
 	rows := lo.Map(boxRows, func(row []string, _ int) string {
 		return lipgloss.JoinHorizontal(lipgloss.Top, row...)
 	})
+	rows = append(rows, extraInfo)
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 

@@ -14,12 +14,14 @@ import (
 	"github.com/bwagner5/kube-demo/pkg/models/grid"
 	"github.com/bwagner5/kube-demo/pkg/models/interactive"
 	"github.com/bwagner5/kube-demo/pkg/models/node"
+	"github.com/bwagner5/kube-demo/pkg/models/pod"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/style"
 )
 
 type Model struct {
 	nodeGridModel    grid.Model[node.Model, node.UpdateMsg, node.DeleteMsg]
+	podGridModel     grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]
 	clusterModel     cluster.Model
 	interactiveModel interactive.Model
 	viewType         ViewType

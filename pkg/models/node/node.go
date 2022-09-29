@@ -156,6 +156,10 @@ func (m Model) getPodGrids() (grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg
 	podGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, nil, nil)
 	daemonSetPodGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, nil, nil)
 
+	// Set the max items to show for each pod type
+	podGrid.MaxItemsShown = 50
+	daemonSetPodGrid.MaxItemsShown = 10
+
 	for k, v := range m.Node.Pods {
 		if !podutils.IsOwnedByDaemonSet(v) {
 			podGrid.Models[k.String()] = pod.NewModel(v)
