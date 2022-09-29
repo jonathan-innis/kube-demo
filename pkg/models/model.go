@@ -40,7 +40,7 @@ func NewModel(c *state.Cluster) Model {
 	events := make(chan state.Event, 100)
 	c.AddOnChangeObserver(func(evt state.Event) { events <- evt })
 	return Model{
-		nodeGridModel:    grid.NewModel[node.Model, node.UpdateMsg, node.DeleteMsg](&style.Canvas, node.GridUpdate, node.GridDelete),
+		nodeGridModel:    grid.NewModel[node.Model, node.UpdateMsg, node.DeleteMsg](&style.Canvas, &style.Node, node.GridUpdate, node.GridDelete),
 		clusterModel:     cluster.NewModel(c),
 		interactiveModel: interactive.NewModel(),
 		stop:             stop,
@@ -166,7 +166,14 @@ func (m Model) View() string {
 		canvas.WriteString("Hello you are in pod detail view now :)")
 		return style.Canvas.Render(canvas.String())
 	case PodView:
-		canvas.WriteString("Hello you are in pod view now :)")
+
+		canvas.WriteString(
+			lipgloss.JoinVertical(lipgloss.Left,
+				"This is pod view\n",
+				m.nodeGridModel.SelectedView(),
+				m.clusterModel.View(),
+			),
+		)
 		return style.Canvas.Render(canvas.String())
 	case NodeView:
 		canvas.WriteString(

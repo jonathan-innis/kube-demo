@@ -101,7 +101,40 @@ func (m Model) View(overrides ...grid.ViewOverride) string {
 		node = override(node)
 	}
 
-	podGrid, daemonSetPodGrid := m.getPodGrids()
+	podGrid, daemonSetPodGrid := m.getPodGrids(&style.Node, &style.Pod)
+	return node.Render(
+		lipgloss.JoinVertical(lipgloss.Left,
+			m.Node.Node.Name,
+			podGrid.View(),
+			style.Separator,
+			daemonSetPodGrid.View(),
+			"\n",
+			progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+				ViewAs(float64(m.Node.PodTotalRequests.Cpu().Value())/float64(m.Node.Allocatable.Cpu().Value())),
+			progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+				ViewAs(float64(m.Node.PodTotalRequests.Memory().Value())/float64(m.Node.Allocatable.Memory().Value())),
+			fmt.Sprintf("\nStatus: %s", nodeutils.GetReadyStatus(m.Node.Node)),
+			getMetadata(m),
+		),
+	)
+}
+
+func (m Model) DetailView() string {
+	var color lipgloss.Color
+	readyConditionStatus := nodeutils.GetCondition(m.Node.Node, corev1.NodeReady).Status
+	switch {
+	case m.Node.Node.Spec.Unschedulable:
+		color = style.Orange
+	case readyConditionStatus == "False":
+		color = style.Red
+	case readyConditionStatus == "True":
+		color = style.Grey
+	default:
+		color = style.Yellow
+	}
+	node := style.Canvas.Copy().BorderBackground(color)
+
+	podGrid, daemonSetPodGrid := m.getPodGrids(&style.Canvas, &style.Node)
 	return node.Render(
 		lipgloss.JoinVertical(lipgloss.Left,
 			m.Node.Node.Name,
@@ -152,9 +185,9 @@ func getValueOrDefault[K comparable, V any](m map[K]V, k K, d V) V {
 	return v
 }
 
-func (m Model) getPodGrids() (grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg], grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]) {
-	podGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, nil, nil)
-	daemonSetPodGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, nil, nil)
+func (m Model) getPodGrids(containerStyle, subContainerStyle *lipgloss.Style) (grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg], grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]) {
+	podGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](containerStyle, subContainerStyle, nil, nil)
+	daemonSetPodGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](containerStyle, subContainerStyle, nil, nil)
 
 	// Set the max items to show for each pod type
 	podGrid.MaxItemsShown = 50

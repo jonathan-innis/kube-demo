@@ -29,11 +29,10 @@ type Model[T Interface[T, U], U, D MessageInterface] struct {
 	MaxItemsShown int
 }
 
-func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle *lipgloss.Style, onUpdate modelUpdateFunc[T, U, D], onDelete modelDeleteFunc[T, U, D]) Model[T, U, D] {
-	subContainer := *new(T)
+func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle, subContainerStyle *lipgloss.Style, onUpdate modelUpdateFunc[T, U, D], onDelete modelDeleteFunc[T, U, D]) Model[T, U, D] {
 	return Model[T, U, D]{
 		containerStyle:    containerStyle,
-		subContainerStyle: subContainer.GetStyle(),
+		subContainerStyle: subContainerStyle,
 		Models:            map[string]T{},
 
 		onUpdate: onUpdate,
@@ -95,6 +94,16 @@ func (m Model[T, U, D]) View() string {
 	})
 	rows = append(rows, extraInfo)
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+func (m Model[T, U, D]) SelectedView() string {
+	listView := m.listView()
+	for i, elem := range listView {
+		if i == m.selected {
+			return elem.DetailView()
+		}
+	}
+	return ""
 }
 
 func (m Model[T, U, D]) Viewport() string {

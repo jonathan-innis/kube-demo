@@ -59,6 +59,19 @@ func (m Model) View(...grid.ViewOverride) string {
 	return style.Pod.Copy().BorderForeground(color).Render("")
 }
 
+func (m Model) DetailView() string {
+	var color lipgloss.Color
+	switch m.pod.Status.Phase {
+	case v1.PodFailed:
+		color = style.Red
+	case v1.PodPending:
+		color = style.Yellow
+	default:
+		color = style.Teal
+	}
+	return style.Node.Copy().BorderForeground(color).Render("")
+}
+
 // TODO: Implement getting the viewport content for the pod
 func (m Model) GetViewportContent() string {
 	return ""
