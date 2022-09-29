@@ -11,15 +11,15 @@ import (
 	"golang.org/x/term"
 
 	"github.com/bwagner5/kube-demo/pkg/models/cluster"
+	"github.com/bwagner5/kube-demo/pkg/models/grid"
 	"github.com/bwagner5/kube-demo/pkg/models/interactive"
 	"github.com/bwagner5/kube-demo/pkg/models/node"
-	"github.com/bwagner5/kube-demo/pkg/models/node_grid"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/style"
 )
 
 type Model struct {
-	nodeGridModel    node_grid.Model
+	nodeGridModel    grid.Model[node.Model, node.UpdateMsg, node.DeleteMsg]
 	clusterModel     cluster.Model
 	interactiveModel interactive.Model
 	viewType         ViewType
@@ -38,7 +38,7 @@ func NewModel(c *state.Cluster) Model {
 	events := make(chan state.Event, 100)
 	c.AddOnChangeObserver(func(evt state.Event) { events <- evt })
 	return Model{
-		nodeGridModel:    node_grid.NewModel(),
+		nodeGridModel:    grid.NewModel[node.Model, node.UpdateMsg, node.DeleteMsg](),
 		clusterModel:     cluster.NewModel(c),
 		interactiveModel: interactive.NewModel(),
 		stop:             stop,
@@ -129,7 +129,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					n := evt.Obj.(*state.Node)
 					switch evt.Type {
 					case state.Update:
-
 						return node.UpdateMsg{ID: n.Node.Name, Node: n}
 					case state.Delete:
 						return node.DeleteMsg{ID: n.Node.Name, Node: n}

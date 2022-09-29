@@ -10,13 +10,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/bwagner5/kube-demo/pkg/components"
+	"github.com/bwagner5/kube-demo/pkg/models/grid"
 	"github.com/bwagner5/kube-demo/pkg/models/metadata"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/style"
 	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
 )
-
-type ViewOverride func(lipgloss.Style) lipgloss.Style
 
 type Model struct {
 	id          string
@@ -37,9 +37,17 @@ type UpdateMsg struct {
 	Node *state.Node
 }
 
+func (m UpdateMsg) GetID() string {
+	return m.ID
+}
+
 type DeleteMsg struct {
 	ID   string
 	Node *state.Node
+}
+
+func (m DeleteMsg) GetID() string {
+	return m.ID
 }
 
 func NewModel(n *state.Node) Model {
@@ -52,6 +60,12 @@ func NewModel(n *state.Node) Model {
 		JustCreated: true,
 		BeenReady:   false,
 	}
+}
+
+func (m Model) InitFromMsg(msg UpdateMsg) Model {
+	m.id = msg.Node.Node.Name
+	m.Node = msg.Node
+	return m
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -78,7 +92,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, tea.Batch(append(cmds, cmd)...)
 }
 
-func (m Model) View(overrides ...ViewOverride) string {
+func (m Model) View(overrides ...grid.ViewOverride) string {
 	var color lipgloss.Color
 	readyConditionStatus := nodeutils.GetCondition(m.Node.Node, corev1.NodeReady).Status
 	switch {
@@ -110,6 +124,18 @@ func (m Model) View(overrides ...ViewOverride) string {
 			getMetadata(m),
 		),
 	)
+}
+
+func (m Model) GetViewportContent() string {
+	return components.GetNodeViewportContent(m.Node.Node)
+}
+
+func (m Model) GetCreationTimestamp() int64 {
+	return m.Node.Node.CreationTimestamp.Unix()
+}
+
+func (m Model) GetUID() string {
+	return string(m.Node.Node.UID)
 }
 
 func getMetadata(m Model) string {
