@@ -87,8 +87,12 @@ func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 	}
 }
 
-func (m Model) GetViewportContent() string {
-	return components.MarshalViewportContent(m.pod)
+func (m Model) GetYAML() string {
+	return components.MarshalYAML(m.pod)
+}
+
+func (m Model) GetJSON() string {
+	return components.MarshalJSON(m.pod)
 }
 
 func (m Model) GetCreationTimestamp() int64 {

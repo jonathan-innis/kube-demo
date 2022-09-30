@@ -18,7 +18,8 @@ type ViewOverride func(lipgloss.Style) lipgloss.Style
 type Interface[T any, U tea.Msg] interface {
 	Update(tea.Msg) (T, tea.Cmd)
 	View(ViewType, ...ViewOverride) string
-	GetViewportContent() string
+	GetYAML() string
+	GetJSON() string
 	GetCreationTimestamp() int64
 	GetUID() string
 }

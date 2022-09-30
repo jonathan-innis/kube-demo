@@ -72,12 +72,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case views.ViewMode:
 				cmds = append(cmds, views.ChangeViewMode(views.InteractiveMode))
 			}
-		case "v", "d":
+		case "y":
 			switch m.viewType {
 			case views.NodeType:
-				cmds = append(cmds, views.ChangeViewType(views.NodeDetailType))
+				cmds = append(cmds, views.ChangeViewType(views.NodeYAMLType))
 			case views.PodType:
-				cmds = append(cmds, views.ChangeViewType(views.PodDetailType))
+				cmds = append(cmds, views.ChangeViewType(views.PodYAMLType))
+			}
+		case "j":
+			switch m.viewType {
+			case views.NodeType:
+				cmds = append(cmds, views.ChangeViewType(views.NodeJSONType))
+			case views.PodType:
+				cmds = append(cmds, views.ChangeViewType(views.PodJSONType))
 			}
 		case "esc", "q":
 			switch m.viewMode {
@@ -85,7 +92,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, views.ChangeViewMode(views.ViewMode))
 			default:
 				switch m.viewType {
-				case views.NodeType, views.NodeDetailType:
+				case views.NodeType, views.NodeYAMLType, views.NodeJSONType:
 					cmds = append(cmds, views.ChangeViewType(views.NodeType))
 				case views.PodType:
 					cmds = append(cmds, views.ChangeViewType(views.NodeType))
@@ -102,7 +109,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 		}
 		switch m.viewType {
-		case views.NodeDetailType, views.PodDetailType:
+		case views.NodeYAMLType, views.PodYAMLType, views.NodeJSONType, views.PodJSONType:
 			// Handle keyboard events in the viewport
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -110,7 +117,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.MouseMsg:
 		switch m.viewType {
-		case views.NodeDetailType, views.PodDetailType:
+		case views.NodeYAMLType, views.PodYAMLType, views.NodeJSONType, views.PodJSONType:
 			// Handle mouse events in the viewport
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -160,16 +167,23 @@ func (m Model) View() string {
 	physicalWidth, physicalHeight, _ := term.GetSize(int(os.Stdout.Fd()))
 	style.Canvas = style.Canvas.MaxWidth(physicalWidth).Width(physicalWidth)
 	switch m.viewType {
-	case views.NodeDetailType:
+	case views.NodeYAMLType, views.PodYAMLType, views.NodeJSONType, views.PodJSONType:
 		m.viewport.Height = physicalHeight
 		m.viewport.Width = physicalWidth
-		m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetViewportContent())
-		return m.viewport.View()
-	case views.PodDetailType:
-		m.viewport.Height = physicalHeight
-		m.viewport.Width = physicalWidth
-		m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetViewportContent())
-		return m.viewport.View()
+		switch m.viewType {
+		case views.NodeYAMLType:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetYAML())
+			return m.viewport.View()
+		case views.PodYAMLType:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetYAML())
+			return m.viewport.View()
+		case views.NodeJSONType:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetJSON())
+			return m.viewport.View()
+		default:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetJSON())
+			return m.viewport.View()
+		}
 	case views.PodType:
 		canvas.WriteString(
 			lipgloss.JoinVertical(lipgloss.Left,

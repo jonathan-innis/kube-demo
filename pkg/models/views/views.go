@@ -5,10 +5,12 @@ import tea "github.com/charmbracelet/bubbletea"
 type Type string
 
 const (
-	NodeType       Type = "Node"
-	PodType        Type = "Pod"
-	NodeDetailType Type = "NodeDetail"
-	PodDetailType  Type = "PodDetail"
+	NodeType     Type = "Node"
+	PodType      Type = "Pod"
+	NodeYAMLType Type = "NodeYAML"
+	PodYAMLType  Type = "PodYAML"
+	NodeJSONType Type = "NodeJSON"
+	PodJSONType  Type = "PodJSON"
 )
 
 type Mode string
