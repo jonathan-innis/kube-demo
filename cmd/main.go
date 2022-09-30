@@ -23,6 +23,11 @@ var (
 )
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered in f", r)
+		}
+	}()
 	config, err := clientcmd.BuildConfigFromFlags("", env.WithDefaultString("KUBECONFIG", defaultKubeConfigPath))
 	if err != nil {
 		log.Fatalf("could not initialize kubeconfig: %v", err)

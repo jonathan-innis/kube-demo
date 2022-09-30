@@ -10,6 +10,7 @@ import (
 
 	"github.com/bwagner5/kube-demo/pkg/components"
 	"github.com/bwagner5/kube-demo/pkg/style"
+	"github.com/bwagner5/kube-demo/pkg/utils/atomic"
 )
 
 type modelUpdateFunc[T Interface[T, U], U, D MessageInterface] func(*Model[T, U, D], U)
@@ -19,7 +20,7 @@ type Model[T Interface[T, U], U, D MessageInterface] struct {
 	containerStyle    *lipgloss.Style
 	subContainerStyle *lipgloss.Style
 
-	Models map[string]T
+	Models *atomic.Map[string, T]
 
 	onUpdate modelUpdateFunc[T, U, D]
 	onDelete modelDeleteFunc[T, U, D]
@@ -30,11 +31,11 @@ type Model[T Interface[T, U], U, D MessageInterface] struct {
 	MaxItemsShown int
 }
 
-func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle, subContainerStyle *lipgloss.Style, onUpdate modelUpdateFunc[T, U, D], onDelete modelDeleteFunc[T, U, D]) Model[T, U, D] {
-	return Model[T, U, D]{
+func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle, subContainerStyle *lipgloss.Style, onUpdate modelUpdateFunc[T, U, D], onDelete modelDeleteFunc[T, U, D]) *Model[T, U, D] {
+	return &Model[T, U, D]{
 		containerStyle:    containerStyle,
 		subContainerStyle: subContainerStyle,
-		Models:            map[string]T{},
+		Models:            atomic.NewMap[string, T](),
 
 		onUpdate: onUpdate,
 		onDelete: onDelete,
@@ -43,11 +44,10 @@ func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle, subConta
 	}
 }
 
-func (m Model[T, U, D]) Init() tea.Cmd { return nil }
+func (m *Model[T, U, D]) Init() tea.Cmd { return nil }
 
-func (m Model[T, U, D]) Update(msg tea.Msg) (Model[T, U, D], tea.Cmd) {
+func (m *Model[T, U, D]) Update(msg tea.Msg) (*Model[T, U, D], tea.Cmd) {
 	var cmds []tea.Cmd
-	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -57,18 +57,21 @@ func (m Model[T, U, D]) Update(msg tea.Msg) (Model[T, U, D], tea.Cmd) {
 			}
 		}
 	case U:
-		m.onUpdate(&m, msg)
+		m.onUpdate(m, msg)
 	case D:
-		m.onDelete(&m, msg)
+		m.onDelete(m, msg)
 	}
-	for k, v := range m.Models {
-		m.Models[k], cmd = v.Update(msg)
+	newModels := atomic.NewMap[string, T]()
+	m.Models.Range(func(k string, v T) {
+		updated, cmd := v.Update(msg)
+		newModels.Load(k, updated)
 		cmds = append(cmds, cmd)
-	}
+	})
+	m.Models = newModels
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model[T, U, D]) View(vt ViewType) string {
+func (m *Model[T, U, D]) View(vt ViewType) string {
 	var extraInfo string
 	listView := m.listView()
 
@@ -100,7 +103,7 @@ func (m Model[T, U, D]) View(vt ViewType) string {
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
 }
 
-func (m Model[T, U, D]) SelectedView() string {
+func (m *Model[T, U, D]) SelectedView() string {
 	listView := m.listView()
 	for i, elem := range listView {
 		if i == m.selected {
@@ -110,13 +113,15 @@ func (m Model[T, U, D]) SelectedView() string {
 	return ""
 }
 
-func (m Model[T, U, D]) ActiveModel() T {
-	listView := lo.Values(m.Models)
-	return listView[m.selected]
+func (m *Model[T, U, D]) ActiveModel() T {
+	return m.listView()[m.selected]
 }
 
-func (m Model[T, U, D]) listView() []T {
-	listView := lo.Values(m.Models)
+func (m *Model[T, U, D]) listView() []T {
+	var listView []T
+	m.Models.Range(func(k string, v T) {
+		listView = append(listView, v)
+	})
 
 	sort.SliceStable(listView, func(i, j int) bool {
 		iCreated := listView[i].GetCreationTimestamp()
@@ -129,8 +134,8 @@ func (m Model[T, U, D]) listView() []T {
 	return listView
 }
 
-func (m Model[T, U, D]) moveCursor(key tea.KeyMsg) int {
-	totalObjects := len(m.Models)
+func (m *Model[T, U, D]) moveCursor(key tea.KeyMsg) int {
+	totalObjects := m.Models.Len()
 	perRow := components.GetBoxesPerRow(*m.containerStyle, *m.subContainerStyle)
 	switch key.String() {
 	case "right":

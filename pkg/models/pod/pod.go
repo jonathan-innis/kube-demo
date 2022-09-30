@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 
 	"github.com/bwagner5/kube-demo/pkg/components"
 	"github.com/bwagner5/kube-demo/pkg/models/grid"
@@ -66,9 +66,13 @@ func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 
 	switch vt {
 	case grid.Standard:
-		return style.Pod.Copy().BorderForeground(color).Render("")
+		return style.Pod.Copy().
+			BorderForeground(color).
+			Render("")
 	default:
-		pod := style.Node.Copy().BorderForeground(color)
+		pod := style.Node.Copy().
+			Border(lipgloss.HiddenBorder(), true).
+			BorderBackground(color)
 		for _, override := range overrides {
 			pod = override(pod)
 		}

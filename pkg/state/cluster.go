@@ -29,6 +29,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/bwagner5/kube-demo/pkg/utils/functional"
 	pod2 "github.com/bwagner5/kube-demo/pkg/utils/pod"
 	podutils "github.com/bwagner5/kube-demo/pkg/utils/resources"
 )
@@ -94,6 +95,22 @@ type Node struct {
 	PodTotalRequests v1.ResourceList
 	// PodTotalLimits is the total resource limits scheduled to this node
 	PodTotalLimits v1.ResourceList
+}
+
+func (n *Node) DeepCopy() *Node {
+	return &Node{
+		Node:               n.Node.DeepCopy(),
+		Pods:               functional.DeepCopyMap(n.Pods),
+		Capacity:           n.Capacity.DeepCopy(),
+		Allocatable:        n.Allocatable.DeepCopy(),
+		Available:          n.Available.DeepCopy(),
+		DaemonSetRequested: n.DaemonSetRequested.DeepCopy(),
+		DaemonSetLimits:    n.DaemonSetLimits.DeepCopy(),
+		podRequests:        functional.DeepCopyMap(n.podRequests),
+		podLimits:          functional.DeepCopyMap(n.podLimits),
+		PodTotalRequests:   n.PodTotalRequests.DeepCopy(),
+		PodTotalLimits:     n.PodTotalLimits.DeepCopy(),
+	}
 }
 
 // ForEachNode calls the supplied function once per node object that is being tracked. It is not safe to store the

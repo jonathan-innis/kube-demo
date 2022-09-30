@@ -20,7 +20,7 @@ import (
 )
 
 type Model struct {
-	nodeGridModel    grid.Model[node.Model, node.UpdateMsg, node.DeleteMsg]
+	nodeGridModel    *grid.Model[*node.Model, node.UpdateMsg, node.DeleteMsg]
 	clusterModel     cluster.Model
 	interactiveModel interactive.Model
 	viewType         views.Type
@@ -36,7 +36,7 @@ func NewModel(c *state.Cluster) Model {
 	events := make(chan state.Event, 100)
 	c.AddOnChangeObserver(func(evt state.Event) { events <- evt })
 	model := Model{
-		nodeGridModel:    grid.NewModel[node.Model, node.UpdateMsg, node.DeleteMsg](&style.Canvas, &style.Node, node.GridUpdate, node.GridDelete),
+		nodeGridModel:    grid.NewModel[*node.Model, node.UpdateMsg, node.DeleteMsg](&style.Canvas, &style.Node, node.GridUpdate, node.GridDelete),
 		clusterModel:     cluster.NewModel(c),
 		interactiveModel: interactive.NewModel(),
 		stop:             stop,

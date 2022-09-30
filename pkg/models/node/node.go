@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/stopwatch"
@@ -17,14 +18,15 @@ import (
 	"github.com/bwagner5/kube-demo/pkg/models/views"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/style"
+	"github.com/bwagner5/kube-demo/pkg/utils/atomic"
 	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
-	podutils "github.com/bwagner5/kube-demo/pkg/utils/pod"
 )
 
 type Model struct {
+	mu           *sync.Mutex
 	id           string
 	Node         *state.Node
-	PodGridModel grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]
+	PodGridModel *grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]
 	StopWatch    stopwatch.Model
 	Seen         bool
 	JustCreated  bool
@@ -49,9 +51,10 @@ func (m DeleteMsg) GetID() string {
 	return m.ID
 }
 
-func NewModel(n *state.Node) Model {
+func NewModel(n *state.Node) *Model {
 	s := stopwatch.New()
-	return Model{
+	return &Model{
+		mu:           &sync.Mutex{},
 		id:           n.Node.Name,
 		Node:         n,
 		PodGridModel: grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, &style.Pod, pod.GridUpdate, pod.GridDelete),
@@ -62,9 +65,9 @@ func NewModel(n *state.Node) Model {
 	}
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd { return nil }
 
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case UpdateMsg:
@@ -79,13 +82,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			cmds = append(cmds, m.StopWatch.Start())
 			m.JustCreated = false
 		}
-		m.Node = msg.Node
+		m.Node = msg.Node.DeepCopy() // We deepcopy here so we don't have concurrent read/writes
 
 		// Update all the pod models based off of the node
-		m.PodGridModel.Models = map[string]pod.Model{}
+		m.mu.Lock()
+		m.PodGridModel.Models = atomic.NewMap[string, pod.Model]()
 		for k, v := range m.Node.Pods {
-			m.PodGridModel.Models[k.String()] = pod.NewModel(v)
+			m.PodGridModel.Models.Load(k.String(), pod.NewModel(v))
 		}
+		m.mu.Unlock()
 	case views.ViewTypeChangeMsg:
 		switch msg.ActiveView {
 		case views.PodType:
@@ -102,7 +107,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
+func (m *Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 	var color lipgloss.Color
 	readyConditionStatus := nodeutils.GetCondition(m.Node.Node, corev1.NodeReady).Status
 	switch {
@@ -149,19 +154,19 @@ func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 
 }
 
-func (m Model) GetViewportContent() string {
+func (m *Model) GetViewportContent() string {
 	return components.MarshalViewportContent(m.Node.Node)
 }
 
-func (m Model) GetCreationTimestamp() int64 {
+func (m *Model) GetCreationTimestamp() int64 {
 	return m.Node.Node.CreationTimestamp.Unix()
 }
 
-func (m Model) GetUID() string {
+func (m *Model) GetUID() string {
 	return string(m.Node.Node.UID)
 }
 
-func getMetadata(m Model) string {
+func getMetadata(m *Model) string {
 	return strings.Join([]string{
 		fmt.Sprintf("Time to Ready: %v", m.StopWatch.View()),
 		fmt.Sprintf("Pods: %d", len(m.Node.Pods)),
@@ -176,22 +181,4 @@ func getValueOrDefault[K comparable, V any](m map[K]V, k K, d V) V {
 		return d
 	}
 	return v
-}
-
-func (m Model) getPodGrids(containerStyle, subContainerStyle *lipgloss.Style) (grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg], grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]) {
-	podGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](containerStyle, subContainerStyle, nil, nil)
-	daemonSetPodGrid := grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](containerStyle, subContainerStyle, nil, nil)
-
-	// Set the max items to show for each pod type
-	podGrid.MaxItemsShown = 50
-	daemonSetPodGrid.MaxItemsShown = 10
-
-	for k, v := range m.Node.Pods {
-		if !podutils.IsOwnedByDaemonSet(v) {
-			podGrid.Models[k.String()] = pod.NewModel(v)
-		} else {
-			daemonSetPodGrid.Models[k.String()] = pod.NewModel(v)
-		}
-	}
-	return podGrid, daemonSetPodGrid
 }

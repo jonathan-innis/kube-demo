@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/go-logr/logr"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,10 +35,7 @@ func Register(ctx context.Context, manager manager.Manager, cluster *Cluster) er
 
 // NewManagerOrDie instantiates a controller manager or panics
 func NewManagerOrDie(ctx context.Context, config *rest.Config) manager.Manager {
-	newManager, err := controllerruntime.NewManager(config, controllerruntime.Options{
-		Logger: logr.Discard(),
-		Scheme: scheme,
-	})
+	newManager, err := controllerruntime.NewManager(config, controllerruntime.Options{})
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create controller newManager, %s", err))
 	}
