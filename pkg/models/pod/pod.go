@@ -32,12 +32,12 @@ func (m DeleteMsg) GetID() string {
 }
 
 type Model struct {
-	pod *v1.Pod
+	Pod *v1.Pod
 }
 
 func NewModel(pod *v1.Pod) Model {
 	return Model{
-		pod: pod,
+		Pod: pod,
 	}
 }
 
@@ -48,14 +48,14 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case UpdateMsg:
-		m.pod = msg.Pod
+		m.Pod = msg.Pod
 	}
 	return m, nil
 }
 
 func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 	var color lipgloss.Color
-	switch m.pod.Status.Phase {
+	switch m.Pod.Status.Phase {
 	case v1.PodFailed:
 		color = style.Red
 	case v1.PodPending:
@@ -71,16 +71,15 @@ func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 			Render("")
 	default:
 		pod := style.Node.Copy().
-			Border(lipgloss.HiddenBorder(), true).
 			BorderBackground(color)
 		for _, override := range overrides {
 			pod = override(pod)
 		}
 		return pod.Render(
 			lipgloss.JoinVertical(
-				lipgloss.Left,
-				m.pod.Name,
-				fmt.Sprintf("Namespace: %s", m.pod.Namespace),
+				lipgloss.Top,
+				m.Pod.Name,
+				fmt.Sprintf("Namespace: %s", m.Pod.Namespace),
 				m.getMetadata(),
 			),
 		)
@@ -88,23 +87,24 @@ func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 }
 
 func (m Model) GetYAML() string {
-	return components.MarshalYAML(m.pod)
+	return components.MarshalYAML(m.Pod)
 }
 
 func (m Model) GetJSON() string {
-	return components.MarshalJSON(m.pod)
+	return components.MarshalJSON(m.Pod)
 }
 
 func (m Model) GetCreationTimestamp() int64 {
-	return m.pod.CreationTimestamp.Unix()
+	return m.Pod.CreationTimestamp.Unix()
 }
 
 func (m Model) GetUID() string {
-	return string(m.pod.UID)
+	return string(m.Pod.UID)
 }
 
 func (m Model) getMetadata() string {
 	return strings.Join([]string{
-		fmt.Sprintf("Containers: %d", len(m.pod.Spec.Containers)),
+		fmt.Sprintf("Containers: %d", len(m.Pod.Spec.Containers)),
+		fmt.Sprintf("Phase: %s", m.Pod.Status.Phase),
 	}, "\n")
 }

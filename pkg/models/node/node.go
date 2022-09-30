@@ -20,6 +20,7 @@ import (
 	"github.com/bwagner5/kube-demo/pkg/style"
 	"github.com/bwagner5/kube-demo/pkg/utils/atomic"
 	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
+	pod2 "github.com/bwagner5/kube-demo/pkg/utils/pod"
 )
 
 type Model struct {
@@ -123,16 +124,18 @@ func (m *Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 
 	switch vt {
 	case grid.Single:
-		return style.Canvas.Copy().BorderBackground(color).Render(
+		return style.Wrapper.Copy().BorderBackground(color).Render(
 			lipgloss.JoinVertical(lipgloss.Left,
-				m.Node.Node.Name,
+				fmt.Sprintf("Node Name: %s", m.Node.Node.Name),
 				m.PodGridModel.View(grid.Detail),
-				"\n",
-				fmt.Sprintf("\nStatus: %s", nodeutils.GetReadyStatus(m.Node.Node)),
+				"Node Metadata",
+				style.Separator,
+				fmt.Sprintf("Status: %s", nodeutils.GetReadyStatus(m.Node.Node)),
 				getMetadata(m),
 			),
 		)
 	default:
+		dsModels, podModels := splitByType(m.PodGridModel)
 		node := style.Node.Copy().BorderBackground(color)
 		for _, override := range overrides {
 			node = override(node)
@@ -140,7 +143,9 @@ func (m *Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 		return node.Render(
 			lipgloss.JoinVertical(lipgloss.Left,
 				m.Node.Node.Name,
-				m.PodGridModel.View(grid.Standard),
+				podModels.View(grid.Standard),
+				style.Separator,
+				dsModels.View(grid.Standard),
 				"\n",
 				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
 					ViewAs(float64(m.Node.PodTotalRequests.Cpu().Value())/float64(m.Node.Allocatable.Cpu().Value())),
@@ -185,4 +190,18 @@ func getValueOrDefault[K comparable, V any](m map[K]V, k K, d V) V {
 		return d
 	}
 	return v
+}
+
+func splitByType(pods *grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]) (*grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg], *grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]) {
+	dsModels := atomic.NewMap[string, pod.Model]()
+	podModels := atomic.NewMap[string, pod.Model]()
+	pods.Models.Range(func(k string, v pod.Model) {
+		if pod2.IsOwnedByDaemonSet(v.Pod) {
+			dsModels.Load(k, v)
+		} else {
+			podModels.Load(k, v)
+		}
+	})
+	return grid.NewModelFromModels(&style.Node, &style.Pod, pod.GridUpdate, pod.GridDelete, dsModels),
+		grid.NewModelFromModels(&style.Node, &style.Pod, pod.GridUpdate, pod.GridDelete, podModels)
 }

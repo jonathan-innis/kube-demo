@@ -22,13 +22,14 @@ import (
 type Model struct {
 	nodeGridModel    *grid.Model[*node.Model, node.UpdateMsg, node.DeleteMsg]
 	clusterModel     cluster.Model
-	interactiveModel interactive.Model
+	interactiveModel *interactive.Model
 	viewType         views.Type
 	viewMode         views.Mode
 	stop             chan struct{}
 	help             help.Model
 	events           <-chan state.Event
 	viewport         viewport.Model
+	console          strings.Builder
 }
 
 func NewModel(c *state.Cluster) Model {
@@ -67,25 +68,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			close(m.stop)
 			return m, tea.Quit
-		case "i":
-			switch m.viewMode {
-			case views.ViewMode:
-				cmds = append(cmds, views.ChangeViewMode(views.InteractiveMode))
-			}
-		case "y":
-			switch m.viewType {
-			case views.NodeType:
-				cmds = append(cmds, views.ChangeViewType(views.NodeYAMLType))
-			case views.PodType:
-				cmds = append(cmds, views.ChangeViewType(views.PodYAMLType))
-			}
-		case "j":
-			switch m.viewType {
-			case views.NodeType:
-				cmds = append(cmds, views.ChangeViewType(views.NodeJSONType))
-			case views.PodType:
-				cmds = append(cmds, views.ChangeViewType(views.PodJSONType))
-			}
 		case "esc":
 			switch m.viewMode {
 			case views.InteractiveMode:
@@ -100,20 +82,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, views.ChangeViewType(views.PodType))
 				}
 			}
-		case "enter":
-			switch m.viewType {
-			case views.NodeType:
-				cmds = append(cmds, views.ChangeViewType(views.PodType))
-			}
-		case "?":
-			m.help.ShowAll = !m.help.ShowAll
 		}
-		switch m.viewType {
-		case views.NodeYAMLType, views.PodYAMLType, views.NodeJSONType, views.PodJSONType:
-			// Handle keyboard events in the viewport
-			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			cmds = append(cmds, cmd)
+		switch m.viewMode {
+		case views.ViewMode:
+			switch msg.String() {
+			case "i":
+				switch m.viewMode {
+				case views.ViewMode:
+					cmds = append(cmds, views.ChangeViewMode(views.InteractiveMode))
+				}
+			case "y":
+				switch m.viewType {
+				case views.NodeType:
+					cmds = append(cmds, views.ChangeViewType(views.NodeYAMLType))
+				case views.PodType:
+					cmds = append(cmds, views.ChangeViewType(views.PodYAMLType))
+				}
+			case "j":
+				switch m.viewType {
+				case views.NodeType:
+					cmds = append(cmds, views.ChangeViewType(views.NodeJSONType))
+				case views.PodType:
+					cmds = append(cmds, views.ChangeViewType(views.PodJSONType))
+				}
+			case "enter":
+				switch m.viewType {
+				case views.NodeType:
+					cmds = append(cmds, views.ChangeViewType(views.PodType))
+				}
+			case "?":
+				m.help.ShowAll = !m.help.ShowAll
+			}
+			switch m.viewType {
+			case views.NodeYAMLType, views.PodYAMLType, views.NodeJSONType, views.PodJSONType:
+				// Handle keyboard events in the viewport
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		default:
+			m.interactiveModel, cmd = m.interactiveModel.Update(msg)
 		}
 	case tea.MouseMsg:
 		switch m.viewType {
@@ -189,7 +197,8 @@ func (m Model) View() string {
 		canvas.WriteString(
 			lipgloss.JoinVertical(lipgloss.Left,
 				m.nodeGridModel.SelectedView(),
-				m.clusterModel.View(),
+				"\n",
+				m.help.View(keyMappings),
 			),
 		)
 		return style.Canvas.Render(canvas.String())
@@ -199,13 +208,14 @@ func (m Model) View() string {
 				lipgloss.Left,
 				m.nodeGridModel.View(grid.Detail),
 				m.clusterModel.View(),
+				"\n",
+				m.help.View(keyMappings),
 			),
 		)
-		_ = physicalHeight - strings.Count(canvas.String(), "\n")
 		if m.viewMode == views.InteractiveMode {
-			return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.interactiveModel.View() + "\n" + m.help.View(keyMappings)
+			canvas.WriteString(m.interactiveModel.View())
 		}
-		return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)
+		return style.Canvas.Render(canvas.String())
 	}
 	return ""
 }

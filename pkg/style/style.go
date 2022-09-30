@@ -4,6 +4,8 @@ import "github.com/charmbracelet/lipgloss"
 
 var Canvas = lipgloss.NewStyle().Padding(1, 2, 1, 2)
 
+var Wrapper = lipgloss.NewStyle().Margin(0).Padding(0)
+
 var Node = lipgloss.NewStyle().
 	Align(lipgloss.Left).
 	Foreground(White).

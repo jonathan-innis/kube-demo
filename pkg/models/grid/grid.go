@@ -44,6 +44,22 @@ func NewModel[T Interface[T, U], U, D MessageInterface](containerStyle, subConta
 	}
 }
 
+func NewModelFromModels[T Interface[T, U], U, D MessageInterface](
+	containerStyle, subContainerStyle *lipgloss.Style,
+	onUpdate modelUpdateFunc[T, U, D], onDelete modelDeleteFunc[T, U, D],
+	models *atomic.Map[string, T]) *Model[T, U, D] {
+	return &Model[T, U, D]{
+		containerStyle:    containerStyle,
+		subContainerStyle: subContainerStyle,
+		Models:            models,
+
+		onUpdate: onUpdate,
+		onDelete: onDelete,
+
+		MaxItemsShown: 50,
+	}
+}
+
 func (m *Model[T, U, D]) Init() tea.Cmd { return nil }
 
 func (m *Model[T, U, D]) Update(msg tea.Msg) (*Model[T, U, D], tea.Cmd) {
