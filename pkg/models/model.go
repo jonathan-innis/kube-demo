@@ -64,7 +64,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c":
+		case "ctrl+c", "q":
 			close(m.stop)
 			return m, tea.Quit
 		case "i":
@@ -86,7 +86,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case views.PodType:
 				cmds = append(cmds, views.ChangeViewType(views.PodJSONType))
 			}
-		case "esc", "q":
+		case "esc":
 			switch m.viewMode {
 			case views.InteractiveMode:
 				cmds = append(cmds, views.ChangeViewMode(views.ViewMode))
@@ -125,11 +125,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case views.ViewTypeChangeMsg:
 		m.viewType = msg.ActiveView
+
+		// Set the active cursor
 		switch msg.ActiveView {
 		case views.NodeType:
 			m.nodeGridModel.CursorActive = true
 		default:
 			m.nodeGridModel.CursorActive = false
+		}
+
+		// Set the viewport in detail view
+		switch msg.ActiveView {
+		case views.NodeYAMLType:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetYAML())
+		case views.PodYAMLType:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetYAML())
+		case views.NodeJSONType:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetJSON())
+		case views.PodJSONType:
+			m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetJSON())
 		}
 	case views.ViewModeChangeMsg:
 		m.viewMode = msg.ActiveMode
@@ -170,20 +184,7 @@ func (m Model) View() string {
 	case views.NodeYAMLType, views.PodYAMLType, views.NodeJSONType, views.PodJSONType:
 		m.viewport.Height = physicalHeight
 		m.viewport.Width = physicalWidth
-		switch m.viewType {
-		case views.NodeYAMLType:
-			m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetYAML())
-			return m.viewport.View()
-		case views.PodYAMLType:
-			m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetYAML())
-			return m.viewport.View()
-		case views.NodeJSONType:
-			m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetJSON())
-			return m.viewport.View()
-		default:
-			m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetJSON())
-			return m.viewport.View()
-		}
+		return m.viewport.View()
 	case views.PodType:
 		canvas.WriteString(
 			lipgloss.JoinVertical(lipgloss.Left,
