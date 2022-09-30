@@ -7,7 +7,7 @@ var Canvas = lipgloss.NewStyle().Padding(1, 2, 1, 2)
 var Node = lipgloss.NewStyle().
 	Align(lipgloss.Left).
 	Foreground(White).
-	Border(lipgloss.HiddenBorder(), true).
+	Border(lipgloss.NormalBorder(), true).
 	BorderBackground(nodeBorder).
 	Margin(1).
 	Padding(0, 1, 0, 1).

@@ -14,22 +14,18 @@ import (
 	"github.com/bwagner5/kube-demo/pkg/models/grid"
 	"github.com/bwagner5/kube-demo/pkg/models/interactive"
 	"github.com/bwagner5/kube-demo/pkg/models/node"
-	"github.com/bwagner5/kube-demo/pkg/models/pod"
+	"github.com/bwagner5/kube-demo/pkg/models/views"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/style"
 )
 
 type Model struct {
 	nodeGridModel    grid.Model[node.Model, node.UpdateMsg, node.DeleteMsg]
-	podGridModel     grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]
 	clusterModel     cluster.Model
 	interactiveModel interactive.Model
-	viewType         ViewType
-	mode             Mode
-	selectedPod      int
-	toggleDetails    bool
+	viewType         views.Type
+	viewMode         views.Mode
 	stop             chan struct{}
-	k8sStateUpdate   chan struct{}
 	help             help.Model
 	events           <-chan state.Event
 	viewport         viewport.Model
@@ -39,17 +35,18 @@ func NewModel(c *state.Cluster) Model {
 	stop := make(chan struct{})
 	events := make(chan state.Event, 100)
 	c.AddOnChangeObserver(func(evt state.Event) { events <- evt })
-	return Model{
+	model := Model{
 		nodeGridModel:    grid.NewModel[node.Model, node.UpdateMsg, node.DeleteMsg](&style.Canvas, &style.Node, node.GridUpdate, node.GridDelete),
 		clusterModel:     cluster.NewModel(c),
 		interactiveModel: interactive.NewModel(),
 		stop:             stop,
 		events:           events,
 		help:             help.New(),
-		viewType:         NodeView,
-		mode:             View,
+		viewType:         views.NodeType,
+		viewMode:         views.ViewMode,
 		viewport:         viewport.New(0, 0),
 	}
+	return model
 }
 
 type startWatchMsg struct{}
@@ -58,7 +55,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(func() tea.Msg {
 		//m.informerFactory.WaitForCacheSync(m.stopCh)
 		return startWatchMsg{}
-	}, tea.EnterAltScreen)
+	}, tea.EnterAltScreen, views.ChangeViewMode(views.ViewMode), views.ChangeViewType(views.NodeType))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -71,44 +68,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			close(m.stop)
 			return m, tea.Quit
 		case "i":
-			switch m.mode {
-			case View:
-				m.mode = Interactive
+			switch m.viewMode {
+			case views.ViewMode:
+				cmds = append(cmds, views.ChangeViewMode(views.InteractiveMode))
+			}
+		case "v", "d":
+			switch m.viewType {
+			case views.NodeType:
+				cmds = append(cmds, views.ChangeViewType(views.NodeDetailType))
+			case views.PodType:
+				cmds = append(cmds, views.ChangeViewType(views.PodDetailType))
 			}
 		case "esc", "q":
-			switch m.mode {
-			case Interactive:
-				m.mode = View
+			switch m.viewMode {
+			case views.InteractiveMode:
+				cmds = append(cmds, views.ChangeViewMode(views.ViewMode))
 			default:
 				switch m.viewType {
-				case NodeView, NodeDetailView:
-					m.viewType = NodeView
-				case PodView:
-					m.viewType = NodeView
+				case views.NodeType, views.NodeDetailType:
+					cmds = append(cmds, views.ChangeViewType(views.NodeType))
+				case views.PodType:
+					cmds = append(cmds, views.ChangeViewType(views.NodeType))
 				default:
-					m.viewType = PodView
+					cmds = append(cmds, views.ChangeViewType(views.PodType))
 				}
 			}
 		case "enter":
 			switch m.viewType {
-			case NodeView, PodView:
-				m.viewType = PodView
+			case views.NodeType:
+				cmds = append(cmds, views.ChangeViewType(views.PodType))
 			}
+		case "?":
+			m.help.ShowAll = !m.help.ShowAll
 		}
 		switch m.viewType {
-		case NodeView:
-			switch msg.String() {
-			case "?":
-				m.help.ShowAll = !m.help.ShowAll
-			case "v", "d":
-				m.viewType = NodeDetailView
-			}
-		case PodView:
-			switch msg.String() {
-			case "v", "d":
-				m.viewType = PodDetailView
-			}
-		case NodeDetailView, PodDetailView:
+		case views.NodeDetailType, views.PodDetailType:
 			// Handle keyboard events in the viewport
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
@@ -116,12 +110,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.MouseMsg:
 		switch m.viewType {
-		case NodeDetailView, PodDetailView:
+		case views.NodeDetailType, views.PodDetailType:
 			// Handle mouse events in the viewport
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
 		}
+	case views.ViewTypeChangeMsg:
+		m.viewType = msg.ActiveView
+		switch msg.ActiveView {
+		case views.NodeType:
+			m.nodeGridModel.CursorActive = true
+		default:
+			m.nodeGridModel.CursorActive = false
+		}
+	case views.ViewModeChangeMsg:
+		m.viewMode = msg.ActiveMode
 	case startWatchMsg, node.UpdateMsg, node.DeleteMsg, cluster.UnboundPodsUpdateMsg:
 		cmds = append(cmds, func() tea.Msg {
 			select {
@@ -144,7 +148,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return nil
 		})
 	}
-
 	m.nodeGridModel, cmd = m.nodeGridModel.Update(msg)
 	cmds = append(cmds, cmd)
 	m.clusterModel, cmd = m.clusterModel.Update(msg)
@@ -157,34 +160,34 @@ func (m Model) View() string {
 	physicalWidth, physicalHeight, _ := term.GetSize(int(os.Stdout.Fd()))
 	style.Canvas = style.Canvas.MaxWidth(physicalWidth).Width(physicalWidth)
 	switch m.viewType {
-	case NodeDetailView:
+	case views.NodeDetailType:
 		m.viewport.Height = physicalHeight
 		m.viewport.Width = physicalWidth
-		m.viewport.SetContent(m.nodeGridModel.Viewport())
+		m.viewport.SetContent(m.nodeGridModel.ActiveModel().GetViewportContent())
 		return m.viewport.View()
-	case PodDetailView:
-		canvas.WriteString("Hello you are in pod detail view now :)")
-		return style.Canvas.Render(canvas.String())
-	case PodView:
-
+	case views.PodDetailType:
+		m.viewport.Height = physicalHeight
+		m.viewport.Width = physicalWidth
+		m.viewport.SetContent(m.nodeGridModel.ActiveModel().PodGridModel.ActiveModel().GetViewportContent())
+		return m.viewport.View()
+	case views.PodType:
 		canvas.WriteString(
 			lipgloss.JoinVertical(lipgloss.Left,
-				"This is pod view\n",
 				m.nodeGridModel.SelectedView(),
 				m.clusterModel.View(),
 			),
 		)
 		return style.Canvas.Render(canvas.String())
-	case NodeView:
+	case views.NodeType:
 		canvas.WriteString(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				m.nodeGridModel.View(),
+				m.nodeGridModel.View(grid.Detail),
 				m.clusterModel.View(),
 			),
 		)
 		_ = physicalHeight - strings.Count(canvas.String(), "\n")
-		if m.mode == Interactive {
+		if m.viewMode == views.InteractiveMode {
 			return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.interactiveModel.View() + "\n" + m.help.View(keyMappings)
 		}
 		return style.Canvas.Render(canvas.String()+strings.Repeat("\n", 0)) + "\n" + m.help.View(keyMappings)

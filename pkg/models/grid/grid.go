@@ -26,6 +26,7 @@ type Model[T Interface[T, U], U, D MessageInterface] struct {
 
 	// View-related options
 	selected      int
+	CursorActive  bool // Defines whether the cursor should respond to keyboard events
 	MaxItemsShown int
 }
 
@@ -51,7 +52,9 @@ func (m Model[T, U, D]) Update(msg tea.Msg) (Model[T, U, D], tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "left", "right", "up", "down":
-			m.selected = m.moveCursor(msg)
+			if m.CursorActive {
+				m.selected = m.moveCursor(msg)
+			}
 		}
 	case U:
 		m.onUpdate(&m, msg)
@@ -65,7 +68,7 @@ func (m Model[T, U, D]) Update(msg tea.Msg) (Model[T, U, D], tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model[T, U, D]) View() string {
+func (m Model[T, U, D]) View(vt ViewType) string {
 	var extraInfo string
 	listView := m.listView()
 
@@ -83,10 +86,11 @@ func (m Model[T, U, D]) View() string {
 		}
 		if i == m.selected {
 			boxRows[row] = append(boxRows[row], elem.View(
+				vt,
 				func(s lipgloss.Style) lipgloss.Style { return s.BorderBackground(style.SelectedBorder) }),
 			)
 		} else {
-			boxRows[row] = append(boxRows[row], elem.View())
+			boxRows[row] = append(boxRows[row], elem.View(vt))
 		}
 	}
 	rows := lo.Map(boxRows, func(row []string, _ int) string {
@@ -100,15 +104,15 @@ func (m Model[T, U, D]) SelectedView() string {
 	listView := m.listView()
 	for i, elem := range listView {
 		if i == m.selected {
-			return elem.DetailView()
+			return elem.View(Single)
 		}
 	}
 	return ""
 }
 
-func (m Model[T, U, D]) Viewport() string {
+func (m Model[T, U, D]) ActiveModel() T {
 	listView := lo.Values(m.Models)
-	return listView[m.selected].GetViewportContent()
+	return listView[m.selected]
 }
 
 func (m Model[T, U, D]) listView() []T {

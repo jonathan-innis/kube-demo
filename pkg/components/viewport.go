@@ -3,16 +3,11 @@ package components
 import (
 	"github.com/ghodss/yaml"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GetNodeViewportContent(n *v1.Node) string {
-	node := hideExtraneousNodeFields(n)
-	return string(lo.Must(yaml.Marshal(node)))
-}
-
-func hideExtraneousNodeFields(n *v1.Node) *v1.Node {
-	node := n.DeepCopy()
-	node.ObjectMeta.ManagedFields = nil // We hid managedFields by default
-	return node
+func MarshalViewportContent(obj client.Object) string {
+	objCopy := obj.DeepCopyObject().(client.Object)
+	objCopy.SetManagedFields(nil) // We hid managedFields by default
+	return string(lo.Must(yaml.Marshal(objCopy)))
 }

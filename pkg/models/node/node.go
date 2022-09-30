@@ -14,6 +14,7 @@ import (
 	"github.com/bwagner5/kube-demo/pkg/models/grid"
 	"github.com/bwagner5/kube-demo/pkg/models/metadata"
 	"github.com/bwagner5/kube-demo/pkg/models/pod"
+	"github.com/bwagner5/kube-demo/pkg/models/views"
 	"github.com/bwagner5/kube-demo/pkg/state"
 	"github.com/bwagner5/kube-demo/pkg/style"
 	nodeutils "github.com/bwagner5/kube-demo/pkg/utils/node"
@@ -21,12 +22,13 @@ import (
 )
 
 type Model struct {
-	id          string
-	Node        *state.Node
-	StopWatch   stopwatch.Model
-	Seen        bool
-	JustCreated bool
-	BeenReady   bool
+	id           string
+	Node         *state.Node
+	PodGridModel grid.Model[pod.Model, pod.UpdateMsg, pod.DeleteMsg]
+	StopWatch    stopwatch.Model
+	Seen         bool
+	JustCreated  bool
+	BeenReady    bool
 }
 
 type UpdateMsg struct {
@@ -50,12 +52,13 @@ func (m DeleteMsg) GetID() string {
 func NewModel(n *state.Node) Model {
 	s := stopwatch.New()
 	return Model{
-		id:          n.Node.Name,
-		Node:        n,
-		StopWatch:   s,
-		Seen:        true,
-		JustCreated: true,
-		BeenReady:   false,
+		id:           n.Node.Name,
+		Node:         n,
+		PodGridModel: grid.NewModel[pod.Model, pod.UpdateMsg, pod.DeleteMsg](&style.Node, &style.Pod, pod.GridUpdate, pod.GridDelete),
+		StopWatch:    s,
+		Seen:         true,
+		JustCreated:  true,
+		BeenReady:    false,
 	}
 }
 
@@ -77,13 +80,29 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.JustCreated = false
 		}
 		m.Node = msg.Node
+
+		// Update all the pod models based off of the node
+		m.PodGridModel.Models = map[string]pod.Model{}
+		for k, v := range m.Node.Pods {
+			m.PodGridModel.Models[k.String()] = pod.NewModel(v)
+		}
+	case views.ViewTypeChangeMsg:
+		switch msg.ActiveView {
+		case views.PodType:
+			m.PodGridModel.CursorActive = true
+		default:
+			m.PodGridModel.CursorActive = false
+		}
 	}
 	var cmd tea.Cmd
+	m.PodGridModel, cmd = m.PodGridModel.Update(msg)
+	cmds = append(cmds, cmd)
 	m.StopWatch, cmd = m.StopWatch.Update(msg)
-	return m, tea.Batch(append(cmds, cmd)...)
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
 }
 
-func (m Model) View(overrides ...grid.ViewOverride) string {
+func (m Model) View(vt grid.ViewType, overrides ...grid.ViewOverride) string {
 	var color lipgloss.Color
 	readyConditionStatus := nodeutils.GetCondition(m.Node.Node, corev1.NodeReady).Status
 	switch {
@@ -96,64 +115,42 @@ func (m Model) View(overrides ...grid.ViewOverride) string {
 	default:
 		color = style.Yellow
 	}
-	node := style.Node.Copy().BorderBackground(color)
-	for _, override := range overrides {
-		node = override(node)
-	}
 
-	podGrid, daemonSetPodGrid := m.getPodGrids(&style.Node, &style.Pod)
-	return node.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			m.Node.Node.Name,
-			podGrid.View(),
-			style.Separator,
-			daemonSetPodGrid.View(),
-			"\n",
-			progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
-				ViewAs(float64(m.Node.PodTotalRequests.Cpu().Value())/float64(m.Node.Allocatable.Cpu().Value())),
-			progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
-				ViewAs(float64(m.Node.PodTotalRequests.Memory().Value())/float64(m.Node.Allocatable.Memory().Value())),
-			fmt.Sprintf("\nStatus: %s", nodeutils.GetReadyStatus(m.Node.Node)),
-			getMetadata(m),
-		),
-	)
-}
-
-func (m Model) DetailView() string {
-	var color lipgloss.Color
-	readyConditionStatus := nodeutils.GetCondition(m.Node.Node, corev1.NodeReady).Status
-	switch {
-	case m.Node.Node.Spec.Unschedulable:
-		color = style.Orange
-	case readyConditionStatus == "False":
-		color = style.Red
-	case readyConditionStatus == "True":
-		color = style.Grey
+	switch vt {
+	case grid.Single:
+		return style.Canvas.Copy().BorderBackground(color).Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				m.Node.Node.Name,
+				m.PodGridModel.View(grid.Detail),
+				"\n",
+				fmt.Sprintf("\nStatus: %s", nodeutils.GetReadyStatus(m.Node.Node)),
+				getMetadata(m),
+			),
+		)
 	default:
-		color = style.Yellow
+		node := style.Node.Copy().BorderBackground(color)
+		for _, override := range overrides {
+			node = override(node)
+		}
+		return node.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				m.Node.Node.Name,
+				m.PodGridModel.View(grid.Standard),
+				"\n",
+				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+					ViewAs(float64(m.Node.PodTotalRequests.Cpu().Value())/float64(m.Node.Allocatable.Cpu().Value())),
+				progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
+					ViewAs(float64(m.Node.PodTotalRequests.Memory().Value())/float64(m.Node.Allocatable.Memory().Value())),
+				fmt.Sprintf("\nStatus: %s", nodeutils.GetReadyStatus(m.Node.Node)),
+				getMetadata(m),
+			),
+		)
 	}
-	node := style.Canvas.Copy().BorderBackground(color)
 
-	podGrid, daemonSetPodGrid := m.getPodGrids(&style.Canvas, &style.Node)
-	return node.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			m.Node.Node.Name,
-			podGrid.View(),
-			style.Separator,
-			daemonSetPodGrid.View(),
-			"\n",
-			progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
-				ViewAs(float64(m.Node.PodTotalRequests.Cpu().Value())/float64(m.Node.Allocatable.Cpu().Value())),
-			progress.New(progress.WithWidth(style.Node.GetWidth()-style.Node.GetHorizontalPadding()), progress.WithScaledGradient("#FF7CCB", "#FDFF8C")).
-				ViewAs(float64(m.Node.PodTotalRequests.Memory().Value())/float64(m.Node.Allocatable.Memory().Value())),
-			fmt.Sprintf("\nStatus: %s", nodeutils.GetReadyStatus(m.Node.Node)),
-			getMetadata(m),
-		),
-	)
 }
 
 func (m Model) GetViewportContent() string {
-	return components.GetNodeViewportContent(m.Node.Node)
+	return components.MarshalViewportContent(m.Node.Node)
 }
 
 func (m Model) GetCreationTimestamp() int64 {
@@ -162,10 +159,6 @@ func (m Model) GetCreationTimestamp() int64 {
 
 func (m Model) GetUID() string {
 	return string(m.Node.Node.UID)
-}
-
-func (m Model) GetStyle() *lipgloss.Style {
-	return &style.Node
 }
 
 func getMetadata(m Model) string {
